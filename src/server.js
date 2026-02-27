@@ -425,7 +425,13 @@ class ProjectRunner {
     
     // Extract model from frontmatter
     const modelMatch = skill.match(/^model:\s*(.+)$/m);
-    const model = modelMatch ? modelMatch[1].trim() : null;
+    const frontmatterModel = modelMatch ? modelMatch[1].trim() : null;
+    
+    // Check config override (config.managers.<name>.model or config.workers.<name>.model)
+    const config = this.loadConfig();
+    const overrides = (isManager ? config.managers : config.workers) || {};
+    const configModel = overrides[agentName]?.model || null;
+    const model = configModel || frontmatterModel || null;
     
     // Read shared rules: everyone.md + role-specific (worker.md or manager.md)
     let everyone = null;
