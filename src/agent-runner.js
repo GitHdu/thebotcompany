@@ -431,19 +431,62 @@ export async function runAgentWithAPI(opts) {
         return makeResult(false, lastResultText || 'Agent timed out', { timedOut: true });
       }
 
-      // Trim conversation history if approaching context limit
-      // Keep first user message + most recent exchanges
+      // Auto-compact conversation history when approaching context limit
       const TOKEN_LIMIT = 160000; // leave headroom below 200K
       if (totalUsage.inputTokens > TOKEN_LIMIT && messages.length > 5) {
         const keep = Math.max(3, Math.floor(messages.length * 0.4));
-        const trimmed = messages.splice(1, messages.length - 1 - keep);
-        const droppedTurns = trimmed.length;
-        log(`Trimmed ${droppedTurns} messages from history (input tokens: ${totalUsage.inputTokens})`);
-        // Insert a note so the agent knows context was trimmed
-        messages.splice(1, 0, {
-          role: 'user',
-          content: [{ type: 'text', text: `[System: ${droppedTurns} earlier messages were trimmed to stay within context limits. Continue your work based on what you can see.]` }],
-        });
+        const toCompact = messages.splice(1, messages.length - 1 - keep);
+        log(`Compacting ${toCompact.length} messages (input tokens: ${totalUsage.inputTokens})...`);
+
+        // Build a text representation of old messages for summarization
+        const compactText = toCompact.map((m, i) => {
+          const role = m.role || 'unknown';
+          let text = '';
+          if (Array.isArray(m.content)) {
+            text = m.content.map(c => {
+              if (c.type === 'text') return c.text;
+              if (c.type === 'tool_use') return `[Tool call: ${c.name}(${JSON.stringify(c.input).slice(0, 200)})]`;
+              if (c.type === 'tool_result') return `[Tool result: ${(typeof c.content === 'string' ? c.content : JSON.stringify(c.content)).slice(0, 500)}]`;
+              return `[${c.type}]`;
+            }).join('\n');
+          } else if (typeof m.content === 'string') {
+            text = m.content;
+          }
+          return `[${role}] ${text.slice(0, 1000)}`;
+        }).join('\n---\n');
+
+        // Use a cheap/fast model for summarization
+        try {
+          const summaryParams = provider.buildRequest({
+            model: model.includes('opus') ? model.replace('opus', 'sonnet') : model,
+            systemPrompt: 'Summarize this agent conversation history concisely. Focus on: what tasks were attempted, what succeeded/failed, what files were modified, current state, and any important decisions. Be specific about file paths, issue numbers, and error messages. Output only the summary.',
+            messages: [{
+              role: 'user',
+              content: [{ type: 'text', text: compactText.slice(0, 80000) }],
+            }],
+            tools: [],
+            isOAuth,
+          });
+
+          const summaryResponse = await provider.callAPI(client, summaryParams, abortController.signal);
+          totalUsage.inputTokens += summaryResponse.usage.inputTokens;
+          totalUsage.outputTokens += summaryResponse.usage.outputTokens;
+          totalUsage.cacheReadTokens += summaryResponse.usage.cacheReadTokens || 0;
+
+          const summary = summaryResponse.content || '(compaction failed — earlier context was dropped)';
+          log(`Compacted ${toCompact.length} messages into summary (${summary.length} chars)`);
+
+          messages.splice(1, 0, {
+            role: 'user',
+            content: [{ type: 'text', text: `[System: The conversation history was auto-compacted to stay within context limits. Here is a summary of the earlier work:]\n\n${summary}` }],
+          });
+        } catch (compactErr) {
+          log(`Compaction summarization failed: ${compactErr.message}, falling back to trim`);
+          messages.splice(1, 0, {
+            role: 'user',
+            content: [{ type: 'text', text: `[System: ${toCompact.length} earlier messages were trimmed to stay within context limits. Continue your work based on what you can see.]` }],
+          });
+        }
       }
 
       // Provider-specific cache hints
