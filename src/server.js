@@ -2680,7 +2680,7 @@ const server = http.createServer(async (req, res) => {
       runner.archived = archive;
       // Update projects.yaml
       try {
-        const configPath = path.join(ROOT, 'projects.yaml');
+        const configPath = path.join(TBC_HOME, 'projects.yaml');
         const raw = fs.readFileSync(configPath, 'utf-8');
         const config = yaml.load(raw) || {};
         if (config.projects && config.projects[projectId]) {
