@@ -49,7 +49,7 @@ Feel free to adjust the roadmap as you learn more. If a milestone turns out to b
 
 **First, check the project state yourself:**
 - Run `tbc-db issue-list` to see all open issues — are there stale issues? Misassigned ones? Issues that should be closed?
-- Run `tbc-db report-list` to read recent worker/manager reports
+- Read worker reports: check `{project_dir}/workspace/{agent_name}/note.md` for each worker and `{project_dir}/responses/` for recent agent logs
 - Check open PRs with `gh pr list` — are there PRs that should be merged or closed?
 - Check the repo state: `git log --oneline -10`, test results, CI status
 
