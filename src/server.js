@@ -1559,9 +1559,9 @@ class ProjectRunner {
 
     const agentModel = agent.rawModel || config.model || 'claude-opus-4-6';
 
-    // Resolve setup token: project-specific > global > none
+    // Resolve token: project-specific > global OAuth > global API key
     const projectToken = config.setupToken;
-    const globalToken = process.env.ANTHROPIC_AUTH_TOKEN;
+    const globalToken = process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_API_KEY || null;
     const resolvedToken = projectToken || globalToken || null;
 
     if (!resolvedToken) {
@@ -1610,10 +1610,19 @@ class ProjectRunner {
       ];
 
       const cliEnv = { ...process.env, ...agentEnv };
-      if (resolvedToken) {
-        cliEnv.CLAUDE_CODE_OAUTH_TOKEN = resolvedToken;
-      }
+      // Clean up any leaked tokens from dotenv/process.env
       delete cliEnv.ANTHROPIC_AUTH_TOKEN;
+      delete cliEnv.ANTHROPIC_API_KEY;
+      delete cliEnv.CLAUDE_CODE_OAUTH_TOKEN;
+      // Set the right env var for the resolved token
+      if (resolvedToken) {
+        const isOAuth = resolvedToken.startsWith('sk-ant-oat');
+        if (isOAuth) {
+          cliEnv.CLAUDE_CODE_OAUTH_TOKEN = resolvedToken;
+        } else {
+          cliEnv.ANTHROPIC_API_KEY = resolvedToken;
+        }
+      }
 
       this.currentAgentProcess = spawn('claude', args, {
         cwd: this.path,
@@ -1885,11 +1894,13 @@ const server = http.createServer(async (req, res) => {
   // --- Settings (global token) ---
 
   if (req.method === 'GET' && url.pathname === '/api/settings') {
-    const token = process.env.ANTHROPIC_AUTH_TOKEN;
+    const token = process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_API_KEY || null;
+    const tokenType = token ? (token.startsWith('sk-ant-oat') ? 'oauth' : 'api_key') : null;
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       hasGlobalToken: !!token,
       globalTokenPreview: token ? maskToken(token) : null,
+      tokenType,
     }));
     return;
   }
@@ -1904,23 +1915,27 @@ const server = http.createServer(async (req, res) => {
         const envPath = path.join(TBC_HOME, '.env');
         let envContent = '';
         try { envContent = fs.readFileSync(envPath, 'utf-8'); } catch {}
-        // Replace or add ANTHROPIC_AUTH_TOKEN
-        if (/^ANTHROPIC_AUTH_TOKEN=.*/m.test(envContent)) {
-          envContent = token
-            ? envContent.replace(/^ANTHROPIC_AUTH_TOKEN=.*/m, `ANTHROPIC_AUTH_TOKEN=${token}`)
-            : envContent.replace(/^ANTHROPIC_AUTH_TOKEN=.*\n?/m, '');
-        } else if (token) {
-          envContent = envContent.trimEnd() + `\nANTHROPIC_AUTH_TOKEN=${token}\n`;
-        }
-        fs.writeFileSync(envPath, envContent);
-        // Update in-memory
+
+        // Clear both token types from .env
+        envContent = envContent
+          .replace(/^ANTHROPIC_AUTH_TOKEN=.*\n?/m, '')
+          .replace(/^ANTHROPIC_API_KEY=.*\n?/m, '');
+        delete process.env.ANTHROPIC_AUTH_TOKEN;
+        delete process.env.ANTHROPIC_API_KEY;
+
         if (token) {
-          process.env.ANTHROPIC_AUTH_TOKEN = token;
-        } else {
-          delete process.env.ANTHROPIC_AUTH_TOKEN;
+          // Auto-detect token type and store in the right env var
+          const isOAuth = token.startsWith('sk-ant-oat');
+          const envVar = isOAuth ? 'ANTHROPIC_AUTH_TOKEN' : 'ANTHROPIC_API_KEY';
+          envContent = envContent.trimEnd() + `\n${envVar}=${token}\n`;
+          process.env[envVar] = token;
         }
+
+        fs.writeFileSync(envPath, envContent);
+        const activeToken = process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_API_KEY || null;
+        const tokenType = activeToken ? (activeToken.startsWith('sk-ant-oat') ? 'oauth' : 'api_key') : null;
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, hasGlobalToken: !!token }));
+        res.end(JSON.stringify({ success: true, hasGlobalToken: !!activeToken, tokenType }));
       } catch (e) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: e.message }));
@@ -1932,7 +1947,7 @@ const server = http.createServer(async (req, res) => {
   // --- Models API (fetch from Anthropic) ---
 
   if (req.method === 'GET' && url.pathname === '/api/models') {
-    const token = process.env.ANTHROPIC_AUTH_TOKEN;
+    const token = process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_API_KEY || null;
     if (!token) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'No auth token configured' }));
