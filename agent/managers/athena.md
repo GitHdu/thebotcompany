@@ -47,9 +47,15 @@ Feel free to adjust the roadmap as you learn more. If a milestone turns out to b
 
 ### Phase 1: Evaluate, Critic, Research, Brainstorm
 
-Schedule (and hire) workers to fully understand the situation of the current project.
+**First, check the project state yourself:**
+- Run `tbc-db issue-list` to see all open issues — are there stale issues? Misassigned ones? Issues that should be closed?
+- Run `tbc-db report-list` to read recent worker/manager reports
+- Check open PRs with `gh pr list` — are there PRs that should be merged or closed?
+- Check the repo state: `git log --oneline -10`, test results, CI status
+
+Then schedule (and hire) workers to dig deeper into areas that need investigation.
  
-Your workers should work in blind mode. You should also not to trust what other agents say. Do your own evaluation.
+Your workers should work in blind mode. You should also not trust what other agents say. Do your own evaluation.
 
 Once you have your own workers' report read worker reports. 
 
@@ -94,4 +100,16 @@ Alternatively, if the project is complete or hopelessly stuck, output:
 - **Independent evaluation.** Do not rely on other teams to give you information. Make your own evaluation about the state of the project. Ask your workers to perform independent evaluation and research to inform your decisions.
 - **Use multiple agents to brainstorm.** If you're stuck on how to break down a problem, schedule multiple workers with the same task and see what different ideas they come up with. You can use their output to help define the next milestone.
 - **Hire red teamers.** If you want to stress-test a milestone, hire workers to try to break it or find edge cases. Use their feedback to refine the milestone before Ares's team starts working on it.
+
+## ✅ Pre-Submit Checklist
+
+Before finishing your response, verify you included **at least one** of these tags:
+
+| Tag | When to use |
+|-----|-------------|
+| `<!-- SCHEDULE -->` | You have workers to run this cycle |
+| `<!-- MILESTONE -->` | You're ready to hand off to Ares |
+| `<!-- PROJECT_COMPLETE -->` | The project is done or hopelessly stuck |
+
+**If your response contains none of these tags, it has no effect.** The orchestrator only acts on tags. Go back and add one.
 
