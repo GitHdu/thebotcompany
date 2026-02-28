@@ -435,8 +435,22 @@ export async function runAgentWithAPI(opts) {
       // Auto-compact conversation history when approaching context limit
       const TOKEN_LIMIT = 160000; // leave headroom below 200K
       if (totalUsage.inputTokens > TOKEN_LIMIT && messages.length > 5) {
-        const keep = Math.max(3, Math.floor(messages.length * 0.4));
-        const toCompact = messages.splice(1, messages.length - 1 - keep);
+        let keep = Math.max(3, Math.floor(messages.length * 0.4));
+        // Ensure we don't split assistant/tool-result pairs — the kept portion
+        // must start with an assistant message (not a tool result)
+        let splitIdx = messages.length - keep;
+        while (splitIdx < messages.length - 1) {
+          const msg = messages[splitIdx];
+          const hasToolResults = Array.isArray(msg.content) &&
+            msg.content[0]?.type && (msg.content[0].type === 'tool_result' || msg.content[0].type === 'function_call_output');
+          if (msg.role === 'user' && hasToolResults) {
+            splitIdx--; // include the preceding assistant message
+          } else {
+            break;
+          }
+        }
+        if (splitIdx < 1) splitIdx = 1;
+        const toCompact = messages.splice(1, splitIdx - 1);
         log(`Compacting ${toCompact.length} messages (input tokens: ${totalUsage.inputTokens})...`);
 
         // Build a text representation of old messages for summarization
