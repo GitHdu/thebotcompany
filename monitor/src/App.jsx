@@ -2560,7 +2560,7 @@ function App() {
                 {/* Agent Skill - shown first and open by default */}
                 <details open>
                   <summary className="text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase cursor-pointer select-none py-1 hover:text-neutral-700 dark:hover:text-neutral-300">Agent Skill — {agentModal.agent}.md</summary>
-                  <div className="bg-neutral-50 dark:bg-neutral-900 rounded p-4 text-sm prose prose-sm dark:prose-invert max-w-none  mt-1">
+                  <div className="text-sm prose prose-sm dark:prose-invert max-w-none mt-1 border-t border-neutral-200 dark:border-neutral-700 pt-3">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{agentModal.data.skill}</ReactMarkdown>
                   </div>
                 </details>
@@ -2568,7 +2568,7 @@ function App() {
                 {agentModal.data.roleRules && (
                 <details>
                   <summary className="text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase cursor-pointer select-none py-1 hover:text-neutral-700 dark:hover:text-neutral-300">{agentModal.data.isManager ? 'Manager' : 'Worker'} Rules — {agentModal.data.isManager ? 'manager' : 'worker'}.md</summary>
-                  <div className="bg-neutral-50 dark:bg-neutral-900 rounded p-4 text-sm prose prose-sm dark:prose-invert max-w-none  mt-1">
+                  <div className="text-sm prose prose-sm dark:prose-invert max-w-none mt-1 border-t border-neutral-200 dark:border-neutral-700 pt-3">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{agentModal.data.roleRules}</ReactMarkdown>
                   </div>
                 </details>
@@ -2577,7 +2577,7 @@ function App() {
                 {agentModal.data.everyone && (
                 <details>
                   <summary className="text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase cursor-pointer select-none py-1 hover:text-neutral-700 dark:hover:text-neutral-300">Shared Rules — everyone.md</summary>
-                  <div className="bg-neutral-50 dark:bg-neutral-900 rounded p-4 text-sm prose prose-sm dark:prose-invert max-w-none  mt-1">
+                  <div className="text-sm prose prose-sm dark:prose-invert max-w-none mt-1 border-t border-neutral-200 dark:border-neutral-700 pt-3">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{agentModal.data.everyone}</ReactMarkdown>
                   </div>
                 </details>
@@ -2588,7 +2588,7 @@ function App() {
                 {agentModal.data.workspaceFiles?.length > 0 ? (
                   <div className="space-y-2">
                     {agentModal.data.workspaceFiles.map((file) => (
-                      <div key={file.name} className="bg-neutral-50 dark:bg-neutral-900 rounded p-3">
+                      <div key={file.name} className="border-b border-neutral-200 dark:border-neutral-700 pb-3 last:border-0">
                         <div className="flex items-center justify-between mb-1">
                           <span className="font-medium text-sm">{file.name}</span>
                           <span className="text-xs text-neutral-400">{new Date(file.modified).toLocaleString()}</span>
