@@ -562,7 +562,7 @@ export async function runAgentWithAPI(opts) {
         for (const tc of response.toolCalls) {
           if (aborted) break;
 
-          log(`Tool: ${tc.name}${tc.name === 'Bash' ? ` → ${(tc.input.command || '').slice(0, 100)}` : ''}`);
+          log(`Tool: ${tc.name}${tc.name === 'Bash' ? ` → ${(tc.input.command || '').slice(0, 300)}` : ''}`);
 
           const remainingMs = timeoutMs > 0 ? Math.max(0, timeoutMs - (Date.now() - startTime)) : 0;
           const result = await executeTool(tc.name, tc.input, cwd, remainingMs, bashEnv);
