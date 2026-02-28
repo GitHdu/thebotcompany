@@ -1,5 +1,6 @@
 /**
- * OpenAI Provider - GPT/o-series models via openai SDK
+ * OpenAI Provider - Using the Responses API (v1/responses)
+ * Required for Codex models (gpt-5.3-codex, etc.)
  */
 
 import OpenAI from 'openai';
@@ -13,7 +14,6 @@ const MODEL_PRICING = {
 };
 
 function getPricing(model) {
-  // Strip openai/ prefix if present
   const name = model.replace(/^openai\//, '');
   return MODEL_PRICING[name] || MODEL_PRICING['gpt-4.1'];
 }
@@ -26,127 +26,136 @@ export class OpenAIProvider extends BaseProvider {
   }
 
   formatTools(tools) {
-    // Convert from Anthropic input_schema format to OpenAI function format
+    // Responses API uses { type: "function", name, description, parameters }
     return tools.map(t => ({
       type: 'function',
-      function: {
-        name: t.name,
-        description: t.description,
-        parameters: t.input_schema,
-      },
+      name: t.name,
+      description: t.description,
+      parameters: t.input_schema,
     }));
   }
 
   buildRequest({ model, systemPrompt, messages, tools, reasoningEffort }) {
-    // Strip openai/ prefix
     const modelName = model.replace(/^openai\//, '');
 
-    // Convert Anthropic-style messages to OpenAI format
-    const openaiMessages = [
-      { role: 'system', content: systemPrompt },
-    ];
+    // Convert our message format to Responses API input items
+    const input = [];
 
     for (const msg of messages) {
-      if (msg.role === 'assistant') {
-        // Could have tool_calls from raw, or be a text message
-        if (msg._openai) {
-          openaiMessages.push(msg._openai);
-        } else if (Array.isArray(msg.content)) {
-          // Anthropic format assistant message - extract text
-          const text = msg.content
-            .filter(b => b.type === 'text')
-            .map(b => b.text)
-            .join('\n');
-          openaiMessages.push({ role: 'assistant', content: text || '' });
-        } else {
-          openaiMessages.push({ role: 'assistant', content: msg.content || '' });
-        }
-      } else if (msg.role === 'user') {
-        if (Array.isArray(msg.content) && msg.content[0]?.type === 'tool_result') {
-          // Tool results - convert to OpenAI tool messages
-          for (const tr of msg.content) {
-            openaiMessages.push({
-              role: 'tool',
-              tool_call_id: tr.tool_use_id || tr.tool_call_id,
-              content: typeof tr.content === 'string' ? tr.content : JSON.stringify(tr.content),
-            });
+      if (msg.role === 'user') {
+        if (Array.isArray(msg.content)) {
+          // Check if these are tool results
+          if (msg.content[0]?.type === 'function_call_output') {
+            for (const item of msg.content) {
+              input.push(item);
+            }
+          } else if (msg.content[0]?.type === 'text') {
+            const text = msg.content.map(c => c.text).join('\n');
+            input.push({ role: 'user', content: text });
           }
-        } else if (Array.isArray(msg.content)) {
-          const text = msg.content
-            .filter(b => b.type === 'text')
-            .map(b => b.text)
-            .join('\n');
-          openaiMessages.push({ role: 'user', content: text });
         } else {
-          openaiMessages.push({ role: 'user', content: msg.content || '' });
+          input.push({ role: 'user', content: msg.content || '' });
+        }
+      } else if (msg.role === 'assistant') {
+        // Re-inject the raw output items we saved
+        if (msg._responseItems) {
+          for (const item of msg._responseItems) {
+            input.push(item);
+          }
+        } else if (typeof msg.content === 'string' && msg.content) {
+          input.push({ role: 'assistant', content: msg.content });
         }
       }
     }
 
     const params = {
       model: modelName,
-      messages: openaiMessages,
+      instructions: systemPrompt,
+      input,
       tools,
-      max_completion_tokens: 16384,
+      store: false,
     };
+
     if (reasoningEffort) {
-      params.reasoning_effort = reasoningEffort;
+      params.reasoning = { effort: reasoningEffort };
     }
+
     return params;
   }
 
   async callAPI(client, params, signal) {
-    const response = await client.chat.completions.create(params, { signal });
+    const response = await client.responses.create(params, { signal });
 
-    const choice = response.choices[0];
-    const message = choice.message;
+    // Extract output items
+    const outputItems = response.output || [];
 
-    const toolCalls = (message.tool_calls || []).map(tc => ({
-      id: tc.id,
-      name: tc.function.name,
-      input: JSON.parse(tc.function.arguments),
-    }));
+    // Extract text content
+    let textContent = '';
+    const toolCalls = [];
 
-    // Map finish_reason to our standard
+    for (const item of outputItems) {
+      if (item.type === 'message') {
+        // Message items contain content array
+        for (const content of (item.content || [])) {
+          if (content.type === 'output_text') {
+            textContent += (textContent ? '\n' : '') + content.text;
+          }
+        }
+      } else if (item.type === 'function_call') {
+        toolCalls.push({
+          id: item.call_id,
+          name: item.name,
+          input: JSON.parse(item.arguments),
+        });
+      }
+    }
+
+    // Determine stop reason
     let stopReason = 'end_turn';
-    if (choice.finish_reason === 'tool_calls') stopReason = 'tool_use';
-    if (choice.finish_reason === 'length') stopReason = 'max_tokens';
+    if (toolCalls.length > 0) {
+      stopReason = 'tool_use';
+    } else if (response.status === 'incomplete' && response.incomplete_details?.reason === 'max_output_tokens') {
+      stopReason = 'max_tokens';
+    }
 
     return {
       role: 'assistant',
-      content: message.content || '',
+      content: textContent,
       toolCalls,
       stopReason,
       usage: {
-        inputTokens: response.usage?.prompt_tokens || 0,
-        outputTokens: response.usage?.completion_tokens || 0,
-        cacheReadTokens: response.usage?.prompt_tokens_details?.cached_tokens || 0,
-        reasoningTokens: response.usage?.completion_tokens_details?.reasoning_tokens || 0,
+        inputTokens: response.usage?.input_tokens || 0,
+        outputTokens: response.usage?.output_tokens || 0,
+        cacheReadTokens: response.usage?.input_tokens_details?.cached_tokens || 0,
+        reasoningTokens: response.usage?.output_tokens_details?.reasoning_tokens || 0,
       },
-      raw: message,
+      raw: outputItems,
     };
   }
 
   buildAssistantMessage(normalized) {
-    // Store the raw OpenAI message for later serialization
+    // Store the raw output items so we can re-inject them in subsequent requests
     return {
       role: 'assistant',
-      content: normalized.raw, // keep raw for text extraction
-      _openai: normalized.raw, // marker for buildRequest to use directly
+      content: normalized.content,
+      _responseItems: normalized.raw,
     };
   }
 
   buildToolResultMessage(results) {
-    // OpenAI uses separate tool messages, but we store in our unified format
-    // and convert in buildRequest
+    // Responses API uses function_call_output items
     return {
       role: 'user',
       content: results.map(r => ({
-        type: 'tool_result',
-        tool_call_id: r.toolCallId,
-        content: r.content,
+        type: 'function_call_output',
+        call_id: r.toolCallId,
+        output: typeof r.content === 'string' ? r.content : JSON.stringify(r.content),
       })),
     };
+  }
+
+  applyCacheHints(messages) {
+    // Responses API handles caching automatically
   }
 
   calculateCost(usage, model) {
