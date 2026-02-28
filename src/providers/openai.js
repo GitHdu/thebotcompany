@@ -26,7 +26,6 @@ export class OpenAIProvider extends BaseProvider {
   }
 
   formatTools(tools) {
-    // Responses API uses { type: "function", name, description, parameters }
     return tools.map(t => ({
       type: 'function',
       name: t.name,
@@ -38,14 +37,14 @@ export class OpenAIProvider extends BaseProvider {
   buildRequest({ model, systemPrompt, messages, tools, reasoningEffort }) {
     const modelName = model.replace(/^openai\//, '');
 
-    // Convert our message format to Responses API input items
+    // Build flat input list for the Responses API
     const input = [];
 
     for (const msg of messages) {
       if (msg.role === 'user') {
         if (Array.isArray(msg.content)) {
-          // Check if these are tool results
           if (msg.content[0]?.type === 'function_call_output') {
+            // Tool results — add as flat items
             for (const item of msg.content) {
               input.push(item);
             }
@@ -57,13 +56,23 @@ export class OpenAIProvider extends BaseProvider {
           input.push({ role: 'user', content: msg.content || '' });
         }
       } else if (msg.role === 'assistant') {
-        // Re-inject the raw output items we saved
-        if (msg._responseItems) {
-          for (const item of msg._responseItems) {
-            input.push(item);
+        // Re-inject assistant content and function calls as flat items
+        if (msg._functionCalls && msg._functionCalls.length > 0) {
+          // Add text content first if any
+          if (msg._textContent) {
+            input.push({ role: 'assistant', content: msg._textContent });
           }
-        } else if (typeof msg.content === 'string' && msg.content) {
-          input.push({ role: 'assistant', content: msg.content });
+          // Add function call items
+          for (const fc of msg._functionCalls) {
+            input.push({
+              type: 'function_call',
+              call_id: fc.call_id,
+              name: fc.name,
+              arguments: fc.arguments,
+            });
+          }
+        } else if (msg._textContent || msg.content) {
+          input.push({ role: 'assistant', content: msg._textContent || msg.content || '' });
         }
       }
     }
@@ -73,7 +82,6 @@ export class OpenAIProvider extends BaseProvider {
       instructions: systemPrompt,
       input,
       tools,
-      store: true,
     };
 
     if (reasoningEffort) {
@@ -86,16 +94,14 @@ export class OpenAIProvider extends BaseProvider {
   async callAPI(client, params, signal) {
     const response = await client.responses.create(params, { signal });
 
-    // Extract output items
     const outputItems = response.output || [];
 
-    // Extract text content
     let textContent = '';
     const toolCalls = [];
+    const rawFunctionCalls = [];
 
     for (const item of outputItems) {
       if (item.type === 'message') {
-        // Message items contain content array
         for (const content of (item.content || [])) {
           if (content.type === 'output_text') {
             textContent += (textContent ? '\n' : '') + content.text;
@@ -107,10 +113,15 @@ export class OpenAIProvider extends BaseProvider {
           name: item.name,
           input: JSON.parse(item.arguments),
         });
+        // Keep raw for re-injection
+        rawFunctionCalls.push({
+          call_id: item.call_id,
+          name: item.name,
+          arguments: item.arguments,
+        });
       }
     }
 
-    // Determine stop reason
     let stopReason = 'end_turn';
     if (toolCalls.length > 0) {
       stopReason = 'tool_use';
@@ -129,21 +140,21 @@ export class OpenAIProvider extends BaseProvider {
         cacheReadTokens: response.usage?.input_tokens_details?.cached_tokens || 0,
         reasoningTokens: response.usage?.output_tokens_details?.reasoning_tokens || 0,
       },
-      raw: outputItems,
+      _textContent: textContent,
+      _functionCalls: rawFunctionCalls,
     };
   }
 
   buildAssistantMessage(normalized) {
-    // Store the raw output items so we can re-inject them in subsequent requests
     return {
       role: 'assistant',
       content: normalized.content,
-      _responseItems: normalized.raw,
+      _textContent: normalized._textContent,
+      _functionCalls: normalized._functionCalls,
     };
   }
 
   buildToolResultMessage(results) {
-    // Responses API uses function_call_output items
     return {
       role: 'user',
       content: results.map(r => ({
