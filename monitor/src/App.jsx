@@ -2620,6 +2620,10 @@ function App() {
                 onChange={(e) => setAgentSettingsModal(prev => ({ ...prev, model: e.target.value }))}
               >
                 <option value="">Inherited from global</option>
+                <option value="high">⚡ High (deep reasoning)</option>
+                <option value="mid">● Mid (default)</option>
+                <option value="low">○ Low (fast/cheap)</option>
+                {availableModels.length > 0 && <option disabled>──── Specific models ────</option>}
                 {availableModels.map(m => (
                   <option key={m.id} value={m.id}>{m.display_name}</option>
                 ))}
