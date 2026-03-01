@@ -2725,7 +2725,7 @@ function App() {
           ) : bootstrapModal.preview ? (
             <div className="space-y-4">
               <p className="text-sm text-neutral-600 dark:text-neutral-400">
-                Bootstrap clears the workspace and creates a fresh tracker issue so agents start from a clean slate.
+                Bootstrap wipes the agent workspace and resets the project cycle so agents start fresh.
               </p>
 
               <div className="p-3 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded">
@@ -2739,9 +2739,7 @@ function App() {
               <div className="p-3 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded">
                 <p className="text-sm font-medium text-green-800 dark:text-green-200 mb-1">What will happen</p>
                 <ul className="text-sm text-green-700 dark:text-green-300 space-y-1 list-disc list-inside">
-                  {bootstrapModal.preview.repo && (
-                    <li>A new GitHub tracker issue will be created and set in config</li>
-                  )}
+                  <li>Phase resets to Athena (strategy)</li>
                   <li>Agents will start fresh — managers will re-hire workers and plan from scratch</li>
                 </ul>
               </div>
@@ -2751,25 +2749,25 @@ function App() {
                 <ul className="text-sm text-neutral-500 dark:text-neutral-400 space-y-1 list-disc list-inside">
                   <li>Project configuration (config.yaml) is preserved</li>
                   <li>All repository files, PRs, and issues remain untouched</li>
-                  <li>The old tracker issue will not be closed</li>
+                  <li>Database (issues, comments) is preserved</li>
                 </ul>
               </div>
 
               {/* Remove roadmap.md option */}
-              {bootstrapModal.preview.hasRoadmap && (
-                <div className="p-3 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={bootstrapModal.removeRoadmap}
-                      onChange={e => setBootstrapModal(prev => ({ ...prev, removeRoadmap: e.target.checked }))}
-                      className="rounded border-neutral-300 dark:border-neutral-600"
-                    />
-                    <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Remove roadmap.md</span>
-                  </label>
-                  <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1 ml-6">Delete roadmap.md from the project repo and push the change</p>
-                </div>
-              )}
+              <div className="p-3 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={bootstrapModal.removeRoadmap}
+                    onChange={e => setBootstrapModal(prev => ({ ...prev, removeRoadmap: e.target.checked }))}
+                    className="rounded border-neutral-300 dark:border-neutral-600"
+                  />
+                  <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Remove roadmap.md</span>
+                </label>
+                <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1 ml-6">
+                  {bootstrapModal.preview.hasRoadmap ? 'Delete roadmap.md from the project repo and push the change' : 'No roadmap.md found — will be skipped'}
+                </p>
+              </div>
 
               {/* Spec.md options */}
               <div className="p-3 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded space-y-3">
