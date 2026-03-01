@@ -2495,7 +2495,7 @@ const server = http.createServer(async (req, res) => {
       delete safeConfig.setupToken;
       res.writeHead(200, { 'Content-Type': 'application/json' });
       const detectedProvider = config.setupTokenProvider || (projectToken ? detectProviderFromToken(projectToken) : null) || (process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_API_KEY ? 'anthropic' : process.env.OPENAI_API_KEY ? 'openai' : 'anthropic');
-      res.end(JSON.stringify({ config: safeConfig, raw, hasProjectToken, projectTokenPreview: projectToken ? maskToken(projectToken) : null, provider: detectedProvider, tiers: MODEL_TIERS[detectedProvider] || {} }));
+      res.end(JSON.stringify({ config: safeConfig, raw, hasProjectToken, projectTokenPreview: projectToken ? maskToken(projectToken) : null, provider: detectedProvider, tiers: MODEL_TIERS[detectedProvider] || {}, allTiers: MODEL_TIERS }));
       return;
     }
 

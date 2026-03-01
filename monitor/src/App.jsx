@@ -1473,43 +1473,92 @@ function App() {
         </div>
 
         {/* Model Tiers */}
-        {isWriteMode && (
+        {isWriteMode && (() => {
+          const currentModels = selectedProject?.config?.models || {};
+          const hasOverrides = !!(currentModels.high || currentModels.mid || currentModels.low);
+          const provider = config?.provider || 'anthropic';
+          const providerTiers = config?.tiers || {};
+          // Build dropdown options from the current provider's tier models
+          const providerModels = [...new Set(Object.values(providerTiers).map(t => t.model).filter(Boolean))];
+          // Also include all models from all providers for the "other" option
+          const allTiers = config?.allTiers || {};
+          const allModels = [...new Set(Object.values(allTiers).flatMap(p => Object.values(p).map(t => t.model)).filter(Boolean))];
+
+          const saveModels = async (models) => {
+            try {
+              await authFetch(projectApi('/models'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ models })
+              });
+              await fetchProjectData();
+            } catch {}
+          };
+
+          return (
           <div className="border-t border-neutral-200 dark:border-neutral-700 pt-5 mt-5">
-            <h3 className="text-sm font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider mb-3">Model Tiers</h3>
-            <p className="text-xs text-neutral-400 dark:text-neutral-500 mb-3">Override the default model for each reasoning tier. Leave empty to use the global default.</p>
-            <div className="space-y-2">
-              {['high', 'mid', 'low'].map(tier => {
-                const currentModels = selectedProject?.config?.models || {};
-                return (
-                  <div key={tier} className="flex items-center gap-2">
-                    <span className={`text-xs font-medium w-10 shrink-0 ${tier === 'high' ? 'text-purple-500' : tier === 'mid' ? 'text-blue-500' : 'text-neutral-400'}`}>{tier.toUpperCase()}</span>
-                    <input
-                      type="text"
-                      placeholder={tier === 'high' ? 'e.g. claude-opus-4-6' : tier === 'mid' ? 'e.g. claude-sonnet-4-5' : 'e.g. claude-haiku-4-5-20251001'}
-                      defaultValue={currentModels[tier] || ''}
-                      onBlur={async (e) => {
-                        const val = e.target.value.trim();
-                        const models = { ...(selectedProject?.config?.models || {}) };
-                        if (val) models[tier] = val; else delete models[tier];
-                        try {
-                          await authFetch(projectApi('/models'), {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ models })
-                          });
-                          await fetchProjectData();
-                          setToast(`${tier} tier model updated`);
-                        } catch {}
-                      }}
-                      onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); }}
-                      className="flex-1 min-w-0 px-3 py-1.5 text-sm border rounded-lg bg-white dark:bg-neutral-800 border-neutral-300 dark:border-neutral-600 text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
-                    />
-                  </div>
-                );
-              })}
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">Model Tiers</h3>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={hasOverrides}
+                onClick={async () => {
+                  if (hasOverrides) {
+                    // Disable: clear all overrides
+                    await saveModels({});
+                    setToast('Model overrides disabled');
+                  } else {
+                    // Enable: set defaults from current provider tiers
+                    const defaults = {};
+                    for (const tier of ['high', 'mid', 'low']) {
+                      if (providerTiers[tier]) defaults[tier] = providerTiers[tier].model;
+                    }
+                    await saveModels(defaults);
+                    setToast('Model overrides enabled');
+                  }
+                }}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ${hasOverrides ? 'bg-blue-500' : 'bg-neutral-300 dark:bg-neutral-600'}`}
+              >
+                <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${hasOverrides ? 'translate-x-5' : 'translate-x-0'}`} />
+              </button>
             </div>
+            {hasOverrides ? (
+              <div className="space-y-2">
+                {['high', 'mid', 'low'].map(tier => (
+                  <div key={tier} className="flex items-center gap-2">
+                    <span className={`text-xs font-bold w-10 shrink-0 ${tier === 'high' ? 'text-purple-500' : tier === 'mid' ? 'text-blue-500' : 'text-neutral-400'}`}>{tier.toUpperCase()}</span>
+                    <select
+                      value={currentModels[tier] || ''}
+                      onChange={async (e) => {
+                        const val = e.target.value;
+                        const models = { ...currentModels };
+                        if (val) models[tier] = val; else delete models[tier];
+                        await saveModels(models);
+                      }}
+                      className="flex-1 min-w-0 px-3 py-1.5 text-sm border rounded-lg bg-white dark:bg-neutral-800 border-neutral-300 dark:border-neutral-600 text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
+                    >
+                      <option value="">Default ({providerTiers[tier]?.model || '—'})</option>
+                      {providerModels.map(m => (
+                        <option key={m} value={m}>{m}</option>
+                      ))}
+                      {allModels.filter(m => !providerModels.includes(m)).length > 0 && (
+                        <optgroup label="Other providers">
+                          {allModels.filter(m => !providerModels.includes(m)).map(m => (
+                            <option key={m} value={m}>{m}</option>
+                          ))}
+                        </optgroup>
+                      )}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-neutral-400 dark:text-neutral-500">Using global defaults ({provider}). Enable to customize per tier.</p>
+            )}
           </div>
-        )}
+          );
+        })()}
 
         {/* Danger Zone */}
         {isWriteMode && (
