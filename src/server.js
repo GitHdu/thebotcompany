@@ -14,6 +14,7 @@ import { spawn, execSync } from 'child_process';
 import yaml from 'js-yaml';
 import Database from 'better-sqlite3';
 import { runAgentWithAPI } from './agent-runner.js';
+import { getProvider } from './providers/index.js';
 import webpush from 'web-push';
 import { config as loadDotenv } from 'dotenv';
 
@@ -46,7 +47,7 @@ const MODEL_TIERS = {
   anthropic: {
     high:  { model: 'claude-opus-4-6' },
     mid:   { model: 'claude-sonnet-4-5' },
-    low:   { model: 'claude-haiku-3-5' },
+    low:   { model: 'claude-haiku-4-5-20251001' },
   },
   openai: {
     high:  { model: 'gpt-5.3-codex', reasoningEffort: 'xhigh' },
@@ -1587,8 +1588,10 @@ class ProjectRunner {
           cycle INTEGER NOT NULL,
           agent TEXT NOT NULL,
           body TEXT NOT NULL,
+          summary TEXT,
           created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
         )`);
+        try { db.exec('ALTER TABLE reports ADD COLUMN summary TEXT'); } catch {}
         db.prepare('INSERT INTO reports (cycle, agent, body, created_at) VALUES (?, ?, ?, ?)').run(this.cycleCount, agent.name, reportBody, new Date().toISOString());
         db.close();
         log(`Saved report for ${agent.name}`, this.id);
@@ -2543,6 +2546,8 @@ const server = http.createServer(async (req, res) => {
           body TEXT NOT NULL,
           created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
         )`);
+        // Migrate: add summary column if missing
+        try { db.exec('ALTER TABLE reports ADD COLUMN summary TEXT'); } catch {}
         const agent = url.searchParams.get('agent');
         const page = parseInt(url.searchParams.get('page')) || 1;
         const perPage = parseInt(url.searchParams.get('per_page')) || 20;
@@ -2559,6 +2564,97 @@ const server = http.createServer(async (req, res) => {
       } catch (e) {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ reports: [], total: 0, page: 1, perPage: 20 }));
+      }
+      return;
+    }
+
+    // POST /api/projects/:id/reports/:reportId/summarize — lazy summarization
+    const summarizeMatch = req.method === 'POST' && subPath.match(/^reports\/(\d+)\/summarize$/);
+    if (summarizeMatch) {
+      const reportId = parseInt(summarizeMatch[1], 10);
+      try {
+        const db = runner.getDb();
+        try { db.exec('ALTER TABLE reports ADD COLUMN summary TEXT'); } catch {}
+        const report = db.prepare('SELECT * FROM reports WHERE id = ?').get(reportId);
+        if (!report) { db.close(); res.writeHead(404); res.end('Not found'); return; }
+        if (report.summary) { db.close(); res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ summary: report.summary })); return; }
+
+        // Use same token/provider resolution as agent calls
+        const config = runner.loadConfig() || {};
+        const projectToken = config.setupToken;
+        let providerName;
+        if (projectToken && config.setupTokenProvider) providerName = config.setupTokenProvider;
+        else if (projectToken) providerName = detectProviderFromToken(projectToken);
+        else if (process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_API_KEY) providerName = 'anthropic';
+        else if (process.env.OPENAI_API_KEY) providerName = 'openai';
+        else if (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY) providerName = 'google';
+        else providerName = 'anthropic';
+
+        const resolved = resolveModelTier('low', providerName);
+        const model = resolved.model;
+
+        // Resolve token same as runAgent
+        let token;
+        if (projectToken) { token = projectToken; }
+        else if (model.startsWith('openai/') || model.startsWith('gpt-')) { token = process.env.OPENAI_API_KEY; }
+        else if (model.startsWith('gemini-') || model.startsWith('google/')) { token = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY; }
+        else { token = process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_API_KEY; }
+
+        if (!token) { db.close(); res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'No API token configured' })); return; }
+
+        log(`Summarize report ${reportId}: provider=${providerName}, model=${model}`, runner.id);
+
+        // Strip meta blocks from body for cleaner summarization
+        const cleanBody = report.body
+          .replace(/^>\s*⏱.*$/m, '')
+          .replace(/<!--[\s\S]*?-->/g, '')
+          .replace(/\n{3,}/g, '\n\n')
+          .trim()
+          .slice(0, 4000);
+
+        const prompt = `Summarize this agent report in 5-8 words. Return ONLY the summary, nothing else.\n\n${cleanBody}`;
+
+        // Use the provider system (handles OAuth, SDK auth, etc.)
+        const { provider: providerInstance } = getProvider(model);
+        const client = providerInstance.createClient({ token });
+
+        let summary;
+        if (providerName === 'anthropic') {
+          const response = await client.messages.create({
+            model, max_tokens: 60,
+            messages: [{ role: 'user', content: prompt }],
+          });
+          summary = response.content?.filter(b => b.type === 'text').map(b => b.text).join('').trim() || null;
+        } else if (providerName === 'openai' || providerName === 'minimax') {
+          // Both OpenAI and MiniMax use OpenAI-compatible chat completions
+          const response = await client.chat.completions.create({
+            model: model.replace(/^(openai|minimax)\//, ''), max_tokens: 60,
+            messages: [{ role: 'user', content: prompt }],
+          });
+          summary = response.choices?.[0]?.message?.content?.trim() || null;
+        } else if (providerName === 'google') {
+          const modelName = model.replace(/^google\//, '');
+          const response = await client.models.generateContent({
+            model: modelName,
+            contents: prompt,
+            config: { maxOutputTokens: 60 },
+          });
+          summary = response.text?.trim() || null;
+        } else {
+          log(`Summarize: unsupported provider ${providerName}`, runner.id);
+          summary = null;
+        }
+
+        if (summary) {
+          db.prepare('UPDATE reports SET summary = ? WHERE id = ?').run(summary, reportId);
+        }
+        db.close();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ summary }));
+      } catch (e) {
+        log(`Summarize error: ${e.message}`, runner.id);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
       }
       return;
     }

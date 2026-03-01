@@ -4,8 +4,9 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Activity, Users, Sparkles, Settings, ScrollText, RefreshCw, Pause, Play, SkipForward, RotateCcw, Square, Save, MessageSquare, X, GitPullRequest, CircleDot, Clock, User, UserCheck, Folder, Plus, Trash2, ArrowLeft, Github, DollarSign, Sun, Moon, Monitor, Filter, Info, ChevronDown, Lock, Unlock, Bell, BellOff } from 'lucide-react'
 import { Modal, ModalHeader, ModalContent } from '@/components/ui/modal'
+import { PanelProvider, Panel, PanelSlot, PanelHeader, PanelContent, usePanelOpen } from '@/components/ui/panel'
 import ReactMarkdown from 'react-markdown'
-import ScheduleDiagram, { parseScheduleBlock, stripAllMetaBlocks, MetaBlockBadges, getAgentTask } from '@/components/ScheduleDiagram'
+import ScheduleDiagram, { parseScheduleBlock, stripAllMetaBlocks, parseTimingBlock, MetaBlockBadges, getAgentTask } from '@/components/ScheduleDiagram'
 import remarkGfm from 'remark-gfm'
 import { Separator } from '@/components/ui/separator'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -50,6 +51,43 @@ function SleepCountdown({ sleepUntil }) {
   }, [sleepUntil])
   
   return <span className="text-sm font-mono text-blue-600">{remaining}</span>
+}
+
+// Lazy report summary component — triggers summarization on first render if missing
+const summaryCache = new Map() // reportId -> summary string | 'loading' | 'error'
+
+function ReportSummary({ reportId, projectId, summary: initialSummary, className }) {
+  const [summary, setSummary] = useState(initialSummary || summaryCache.get(reportId) || null)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (summary || loading || summaryCache.get(reportId) === 'loading') return
+    if (summaryCache.get(reportId) === 'error') return
+    const cached = summaryCache.get(reportId)
+    if (cached && cached !== 'loading' && cached !== 'error') { setSummary(cached); return }
+
+    summaryCache.set(reportId, 'loading')
+    setLoading(true)
+    fetch(`/api/projects/${projectId}/reports/${reportId}/summarize`, { method: 'POST' })
+      .then(r => r.json())
+      .then(data => {
+        if (data.summary) {
+          summaryCache.set(reportId, data.summary)
+          setSummary(data.summary)
+        } else {
+          summaryCache.set(reportId, 'error')
+        }
+      })
+      .catch(() => summaryCache.set(reportId, 'error'))
+      .finally(() => setLoading(false))
+  }, [reportId, projectId, summary, loading])
+
+  if (!summary && !loading) return null
+  return (
+    <span className={className || "text-xs text-neutral-500 dark:text-neutral-400 italic"}>
+      {loading ? '…' : summary}
+    </span>
+  )
 }
 
 function App() {
@@ -119,6 +157,7 @@ function App() {
   const [loginInput, setLoginInput] = useState('')
   const [budgetInfoModal, setBudgetInfoModal] = useState(false)
   const [notificationsEnabled, setNotificationsEnabled] = useState(() => localStorage.getItem('tbc_notifications') === 'true')
+  const [reportsPanelOpen, setReportsPanelOpen] = useState(false)
   const [notifCenter, setNotifCenter] = useState(false)
   const [notifList, setNotifList] = useState([])
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -1097,9 +1136,9 @@ function App() {
   const notifPermission = notifSupported ? Notification.permission : 'default'
 
   const settingsModal = (
-    <Modal open={settingsOpen} onClose={() => setSettingsOpen(false)}>
-      <ModalHeader>Settings</ModalHeader>
-      <ModalContent>
+    <Panel id="settings" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
+      <PanelHeader onClose={() => setSettingsOpen(false)}>Settings</PanelHeader>
+      <PanelContent>
         <div className="pb-5">
           <h3 className="text-sm font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider mb-3">Display</h3>
           <div className="flex items-center justify-between py-2">
@@ -1255,8 +1294,8 @@ function App() {
             </div>
           </div>
         </div>
-      </ModalContent>
-    </Modal>
+      </PanelContent>
+    </Panel>
   )
 
   // Project settings: per-project overrides stored in localStorage
@@ -1281,9 +1320,9 @@ function App() {
   const notifUseGlobal = projNotifSettings.useGlobal !== false
 
   const projectSettingsModal = selectedProject && (
-    <Modal open={projectSettingsOpen} onClose={() => setProjectSettingsOpen(false)}>
-      <ModalHeader>Project Settings</ModalHeader>
-      <ModalContent>
+    <Panel id="project-settings" open={projectSettingsOpen} onClose={() => setProjectSettingsOpen(false)}>
+      <PanelHeader onClose={() => setProjectSettingsOpen(false)}>Project Settings</PanelHeader>
+      <PanelContent>
         {/* Notifications section */}
         <div className="pb-5">
           <h3 className="text-sm font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider mb-3">Notifications</h3>
@@ -1473,13 +1512,14 @@ function App() {
             </div>
           </div>
         )}
-      </ModalContent>
-    </Modal>
+      </PanelContent>
+    </Panel>
   )
 
   if (!selectedProject) {
     return (
-      <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 p-6">
+      <div className="flex min-h-screen">
+      <div className="flex-1 min-w-0 bg-neutral-50 dark:bg-neutral-950 p-6">
         <div className="max-w-4xl mx-auto">
           <div className="mb-6 sm:mb-8">
             <div className="flex items-start sm:items-center justify-between gap-2">
@@ -1959,8 +1999,8 @@ function App() {
 
         {settingsModal}
         {/* Notification Center (project list) */}
-        <Modal open={notifCenter} onClose={() => setNotifCenter(false)}>
-          <ModalHeader>
+        <Panel id="notifications" open={notifCenter} onClose={() => setNotifCenter(false)}>
+          <PanelHeader onClose={() => setNotifCenter(false)}>
             <div className="flex items-center justify-between w-full">
               <span>Notifications</span>
               {unreadCount > 0 && (
@@ -1969,8 +2009,8 @@ function App() {
                 </button>
               )}
             </div>
-          </ModalHeader>
-          <ModalContent>
+          </PanelHeader>
+          <PanelContent>
             <div className="divide-y divide-neutral-100 dark:divide-neutral-800">
               {notifList.length === 0 ? (
                 <div className="p-8 text-center text-neutral-400 dark:text-neutral-500">
@@ -1979,15 +2019,18 @@ function App() {
                 </div>
               ) : notifList.map(n => <NotifItem key={n.id} n={n} />)}
             </div>
-          </ModalContent>
-        </Modal>
+          </PanelContent>
+        </Panel>
+      </div>
+      <PanelSlot />
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 p-6">
-      <div className="max-w-7xl mx-auto">
+    <div className="flex min-h-screen">
+    <div className="flex-1 min-w-0 bg-neutral-50 dark:bg-neutral-950 p-6">
+      <div>
         {/* Header - Mobile Friendly */}
         <div className="mb-6 space-y-3">
           {/* Desktop: single row. Mobile: two rows */}
@@ -2002,11 +2045,11 @@ function App() {
             </div>
             
             {/* Right: Actions */}
-            <div className="flex items-center gap-2 pl-8 sm:pl-0">
+            <div className="flex items-center gap-1.5 pl-8 sm:pl-0 shrink-0">
               <button
                 onClick={() => setNotifCenter(true)}
-                className="px-2 py-1.5 rounded bg-neutral-200 dark:bg-neutral-700 hover:bg-neutral-300 dark:hover:bg-neutral-600 text-neutral-600 dark:text-neutral-300 transition-colors relative"
-                title="Notification Center"
+                className="p-1.5 rounded bg-neutral-200 dark:bg-neutral-700 hover:bg-neutral-300 dark:hover:bg-neutral-600 text-neutral-600 dark:text-neutral-300 transition-colors relative"
+                title="Notifications"
               >
                 <Bell className="w-4 h-4" />
                 {unreadCount > 0 && (
@@ -2017,42 +2060,37 @@ function App() {
               </button>
               <button
                 onClick={() => isWriteMode ? handleLogout() : setLoginModal(true)}
-                className={`px-2 py-1.5 rounded transition-colors ${isWriteMode ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-800' : 'bg-neutral-200 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-300 dark:hover:bg-neutral-600'}`}
+                className={`p-1.5 rounded transition-colors ${isWriteMode ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-800' : 'bg-neutral-200 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-300 dark:hover:bg-neutral-600'}`}
                 title={isWriteMode ? 'Write mode (click to lock)' : 'Read-only (click to unlock)'}
               >
                 {isWriteMode ? <Unlock className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
               </button>
               <button
                 onClick={() => setProjectSettingsOpen(true)}
-                className="px-2 py-1.5 rounded bg-neutral-200 dark:bg-neutral-700 hover:bg-neutral-300 dark:hover:bg-neutral-600 text-neutral-600 dark:text-neutral-300 transition-colors"
+                className="p-1.5 rounded bg-neutral-200 dark:bg-neutral-700 hover:bg-neutral-300 dark:hover:bg-neutral-600 text-neutral-600 dark:text-neutral-300 transition-colors"
                 title="Project Settings"
               >
                 <Settings className="w-4 h-4" />
               </button>
-              <a href={projectApi('/download')} className="px-2 sm:px-3 py-1.5 bg-neutral-200 dark:bg-neutral-700 hover:bg-neutral-300 dark:hover:bg-neutral-600 rounded text-xs text-neutral-700 dark:text-neutral-300 font-medium inline-flex items-center" title="Download workspace as ZIP">
-                <Save className="w-3.5 h-3.5 sm:mr-1.5" />
-                <span className="hidden sm:inline">Download</span>
+              <a href={projectApi('/download')} className="p-1.5 rounded bg-neutral-200 dark:bg-neutral-700 hover:bg-neutral-300 dark:hover:bg-neutral-600 text-neutral-600 dark:text-neutral-300 inline-flex items-center" title="Download workspace as ZIP">
+                <Save className="w-4 h-4" />
               </a>
               {repoUrl && (
-                <a href={repoUrl} target="_blank" rel="noopener noreferrer" className="px-2 sm:px-3 py-1.5 bg-neutral-200 dark:bg-neutral-700 hover:bg-neutral-300 dark:hover:bg-neutral-600 rounded text-xs text-neutral-700 dark:text-neutral-300 font-medium inline-flex items-center" title="GitHub">
-                  <Github className="w-3.5 h-3.5 sm:mr-1.5" />
-                  <span className="hidden sm:inline">GitHub</span>
+                <a href={repoUrl} target="_blank" rel="noopener noreferrer" className="p-1.5 rounded bg-neutral-200 dark:bg-neutral-700 hover:bg-neutral-300 dark:hover:bg-neutral-600 text-neutral-600 dark:text-neutral-300 inline-flex items-center" title="Open on GitHub">
+                  <Github className="w-4 h-4" />
                 </a>
               )}
               {isWriteMode && (selectedProject.paused ? (
-                <button onClick={() => controlAction('resume')} className="px-2 sm:px-3 py-1.5 bg-green-500 hover:bg-green-600 text-white rounded text-xs font-medium inline-flex items-center" title="Resume">
-                  <Play className="w-3.5 h-3.5 sm:mr-1.5" />
-                  <span className="hidden sm:inline">Resume</span>
+                <button onClick={() => controlAction('resume')} className="p-1.5 rounded bg-green-500 hover:bg-green-600 text-white transition-colors" title="Resume project">
+                  <Play className="w-4 h-4" />
                 </button>
               ) : (
-                <button onClick={() => controlAction('pause')} className="px-2 sm:px-3 py-1.5 bg-neutral-200 dark:bg-neutral-700 hover:bg-neutral-300 dark:hover:bg-neutral-600 rounded text-xs text-neutral-700 dark:text-neutral-300 font-medium inline-flex items-center" title="Pause">
-                  <Pause className="w-3.5 h-3.5 sm:mr-1.5" />
-                  <span className="hidden sm:inline">Pause</span>
+                <button onClick={() => controlAction('pause')} className="p-1.5 rounded bg-neutral-200 dark:bg-neutral-700 hover:bg-neutral-300 dark:hover:bg-neutral-600 text-neutral-600 dark:text-neutral-300 transition-colors" title="Pause project">
+                  <Pause className="w-4 h-4" />
                 </button>
               ))}
-              {isWriteMode && <button onClick={openBootstrapModal} className="px-2 sm:px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white rounded text-xs font-medium inline-flex items-center" title="Bootstrap">
-                <RotateCcw className="w-3.5 h-3.5 sm:mr-1.5" />
-                <span className="hidden sm:inline">Bootstrap</span>
+              {isWriteMode && <button onClick={openBootstrapModal} className="p-1.5 rounded bg-red-500 hover:bg-red-600 text-white transition-colors" title="Bootstrap project">
+                <RotateCcw className="w-4 h-4" />
               </button>}
             </div>
           </div>
@@ -2135,7 +2173,7 @@ function App() {
             )}
 
             {/* Row 1: State, Cost & Budget, Config */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))" }}>
               {/* State */}
               <Card>
                 <CardHeader><CardTitle className="flex items-center gap-2"><Activity className="w-4 h-4" />Orchestrator State</CardTitle></CardHeader>
@@ -2359,11 +2397,8 @@ function App() {
                   )}
                 </CardContent>
               </Card>
-            </div>
 
-            {/* Row 2: Managers, Workers, PRs */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4">
-              {/* Managers */}
+              {/* Managers, Workers, PRs */}
               <Card>
                 <CardHeader><CardTitle className="flex items-center gap-2"><Sparkles className="w-4 h-4" />Managers ({agents.managers.length})</CardTitle></CardHeader>
                 <CardContent>
@@ -2407,58 +2442,52 @@ function App() {
                   </div>
                 </CardContent>
               </Card>
-            </div>
 
-            {/* Row 3: Agent Reports + Issues */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
               {/* Agent Reports */}
-              <Card className="flex flex-col h-[500px]">
-                <CardHeader className="pb-3 shrink-0">
+              <Card className="h-[500px]">
+                <CardHeader className="pb-2">
                   <CardTitle className="flex items-center justify-between">
-                    <span className="flex items-center gap-2">
-                      <MessageSquare className="w-4 h-4" />Agent Reports
-                      {selectedAgent && (
-                        <Badge variant="secondary" className="ml-2 capitalize">
-                          {selectedAgent}
-                          <button onClick={clearAgentFilter} className="ml-1 hover:text-red-500"><X className="w-3 h-3" /></button>
-                        </Badge>
-                      )}
-                    </span>
+                    <span className="flex items-center gap-2"><MessageSquare className="w-4 h-4" />Agent Reports</span>
                     <span className="text-sm font-normal text-neutral-500 dark:text-neutral-400">{comments.length} loaded</span>
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="pt-0 flex-1 overflow-hidden">
-                  <div ref={reportsScrollRef} className="h-full overflow-y-auto overflow-x-hidden pr-2" onScroll={(e) => {
+                <CardContent className="pt-0 overflow-hidden">
+                  <div className="divide-y divide-neutral-100 dark:divide-neutral-800 overflow-y-auto overflow-x-hidden h-full" onScroll={(e) => {
                     const { scrollTop, scrollHeight, clientHeight } = e.target
                     if (scrollHeight - scrollTop - clientHeight < 100) loadMoreComments()
                   }}>
-                    {comments.length === 0 && !commentsLoading && <p className="text-sm text-neutral-400 dark:text-neutral-500 text-center py-8">No reports found</p>}
-                    {comments.map((comment, idx) => (
-                      <div key={comment.id}>
-                        {idx > 0 && <Separator className="my-4" />}
-                        <div>
-                          <div className="flex items-center gap-2 mb-1">
-                            <Avatar className="w-6 h-6 sm:w-8 sm:h-8">
-                              <AvatarFallback className="bg-gradient-to-br from-blue-400 to-purple-500 text-white text-xs">
-                                {(comment.agent || comment.author).slice(0, 2).toUpperCase()}
-                              </AvatarFallback>
-                            </Avatar>
-                            <span className="text-sm font-semibold text-neutral-800 dark:text-neutral-100 capitalize">{comment.agent || comment.author}</span>
-                            <span className="text-xs text-neutral-400 dark:text-neutral-500">{new Date(comment.created_at).toLocaleString()}</span>
-                          </div>
-                          <div className="text-sm text-neutral-700 dark:text-neutral-300 prose prose-sm prose-neutral dark:prose-invert max-w-none break-words [&_code]:break-all">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{stripAllMetaBlocks(comment.body)}</ReactMarkdown>
-                            {parseScheduleBlock(comment.body) && (
-                              <ScheduleDiagram schedule={parseScheduleBlock(comment.body)} />
-                            )}
-                            <MetaBlockBadges text={comment.body} />
-                          </div>
+                    {comments.length === 0 && !commentsLoading && <p className="text-sm text-neutral-400 dark:text-neutral-500 text-center py-4">No reports</p>}
+                    {comments.map((comment) => (
+                      <div
+                        key={comment.id}
+                        className="py-2.5 hover:bg-neutral-50 dark:hover:bg-neutral-800/50 cursor-pointer transition-colors -mx-1 px-1 rounded"
+                        onClick={() => setReportsPanelOpen(true)}
+                      >
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <Avatar className="w-5 h-5">
+                            <AvatarFallback className="bg-gradient-to-br from-blue-400 to-purple-500 text-white text-[9px]">
+                              {(comment.agent || comment.author).slice(0, 2).toUpperCase()}
+                            </AvatarFallback>
+                          </Avatar>
+                          <span className="text-xs font-semibold text-neutral-800 dark:text-neutral-100 capitalize">{comment.agent || comment.author}</span>
+                          {(() => { const t = parseTimingBlock(comment.body); return t ? (
+                            <span className="text-[11px] text-neutral-400 dark:text-neutral-500 ml-auto whitespace-nowrap flex items-center gap-1">
+                              <span>{t.ended}</span>
+                              <span className="text-neutral-300 dark:text-neutral-600">·</span>
+                              <span>{t.duration}</span>
+                            </span>
+                          ) : (
+                            <span className="text-[11px] text-neutral-400 dark:text-neutral-500 ml-auto whitespace-nowrap">{new Date(comment.created_at).toLocaleString()}</span>
+                          ); })()}
+                        </div>
+                        <div className="text-xs text-neutral-500 dark:text-neutral-400 break-words leading-relaxed pl-7">
+                          <ReportSummary reportId={comment.id} projectId={selectedProject?.id} summary={comment.summary} />
                         </div>
                       </div>
                     ))}
                     {commentsLoading && (
-                      <div className="flex items-center justify-center py-4 gap-2 text-neutral-400 dark:text-neutral-500">
-                        <RefreshCw className="w-4 h-4 animate-spin" /><span className="text-sm">Loading...</span>
+                      <div className="flex items-center justify-center py-3 text-neutral-400">
+                        <span className="text-xs">Loading...</span>
                       </div>
                     )}
                   </div>
@@ -2543,12 +2572,12 @@ function App() {
       </div>
 
       {/* Agent Details Modal */}
-      <Modal open={agentModal.open} onClose={() => setAgentModal({ ...agentModal, open: false })}>
-        <ModalHeader onClose={() => setAgentModal({ ...agentModal, open: false })}>
+      <Panel id="agent-detail" open={agentModal.open} onClose={() => setAgentModal({ ...agentModal, open: false })}>
+        <PanelHeader onClose={() => setAgentModal({ ...agentModal, open: false })}>
           <span className="capitalize">{agentModal.agent}</span>
           {agentModal.data?.isManager && <Badge variant="secondary" className="ml-2">Manager</Badge>}
-        </ModalHeader>
-        <ModalContent>
+        </PanelHeader>
+        <PanelContent>
           {agentModal.loading ? (
             <div className="flex items-center justify-center py-8">
               <RefreshCw className="w-6 h-6 animate-spin text-neutral-400" />
@@ -2623,8 +2652,8 @@ function App() {
           ) : (
             <p className="text-neutral-400 dark:text-neutral-500 text-center py-8">Failed to load agent details</p>
           )}
-        </ModalContent>
-      </Modal>
+        </PanelContent>
+      </Panel>
 
       {/* Agent Settings Modal */}
       <Modal open={agentSettingsModal.open} onClose={() => setAgentSettingsModal({ ...agentSettingsModal, open: false })}>
@@ -2883,11 +2912,11 @@ function App() {
       </Modal>
 
       {/* Issue Detail Modal */}
-      <Modal open={issueModal.open} onClose={() => setIssueModal({ ...issueModal, open: false })}>
-        <ModalHeader onClose={() => setIssueModal({ ...issueModal, open: false })}>
+      <Panel id="issue-detail" open={issueModal.open} onClose={() => setIssueModal({ ...issueModal, open: false })}>
+        <PanelHeader onClose={() => setIssueModal({ ...issueModal, open: false })}>
           {issueModal.issue ? `#${issueModal.issue.id} ${issueModal.issue.title}` : 'Issue'}
-        </ModalHeader>
-        <ModalContent>
+        </PanelHeader>
+        <PanelContent>
           {issueModal.loading ? (
             <div className="flex items-center justify-center py-8">
               <RefreshCw className="w-6 h-6 animate-spin text-neutral-400" />
@@ -3022,8 +3051,69 @@ function App() {
           ) : (
             <p className="text-neutral-400 dark:text-neutral-500 text-center py-8">Failed to load issue</p>
           )}
-        </ModalContent>
-      </Modal>
+        </PanelContent>
+      </Panel>
+
+      {/* Agent Reports Panel */}
+      <Panel id="reports" open={reportsPanelOpen} onClose={() => setReportsPanelOpen(false)}>
+        <PanelHeader onClose={() => setReportsPanelOpen(false)}>
+          <span className="flex items-center gap-2">
+            <MessageSquare className="w-4 h-4" />Agent Reports
+            {selectedAgent && (
+              <Badge variant="secondary" className="ml-2 capitalize">
+                {selectedAgent}
+                <button onClick={clearAgentFilter} className="ml-1 hover:text-red-500"><X className="w-3 h-3" /></button>
+              </Badge>
+            )}
+            <span className="text-sm font-normal text-neutral-400 ml-auto">{comments.length} loaded</span>
+          </span>
+        </PanelHeader>
+        <PanelContent onScroll={(e) => {
+            const { scrollTop, scrollHeight, clientHeight } = e.target
+            if (scrollHeight - scrollTop - clientHeight < 100) loadMoreComments()
+          }}>
+          <div ref={reportsScrollRef}>
+            {comments.length === 0 && !commentsLoading && <p className="text-sm text-neutral-400 dark:text-neutral-500 text-center py-8">No reports found</p>}
+            {comments.map((comment, idx) => (
+              <div key={comment.id}>
+                {idx > 0 && <Separator className="my-4" />}
+                <div>
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
+                    <Avatar className="w-6 h-6 sm:w-8 sm:h-8">
+                      <AvatarFallback className="bg-gradient-to-br from-blue-400 to-purple-500 text-white text-xs">
+                        {(comment.agent || comment.author).slice(0, 2).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                    <span className="text-sm font-semibold text-neutral-800 dark:text-neutral-100 capitalize">{comment.agent || comment.author}</span>
+                    {(() => { const t = parseTimingBlock(comment.body); return t ? (
+                      <span className="text-xs text-neutral-400 dark:text-neutral-500 flex items-center gap-1.5">
+                        <span>{t.ended}</span>
+                        <span className="text-neutral-300 dark:text-neutral-600">·</span>
+                        <span>{t.duration}</span>
+                      </span>
+                    ) : (
+                      <span className="text-xs text-neutral-400 dark:text-neutral-500">{new Date(comment.created_at).toLocaleString()}</span>
+                    ); })()}
+                  </div>
+                  <ReportSummary reportId={comment.id} projectId={selectedProject?.id} summary={comment.summary} className="text-xs text-neutral-500 dark:text-neutral-400 italic block mb-1" />
+                  <div className="text-sm text-neutral-700 dark:text-neutral-300 prose prose-sm prose-neutral dark:prose-invert max-w-none break-words [&_code]:break-all overflow-x-auto [&_table]:text-xs [&_pre]:overflow-x-auto">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{stripAllMetaBlocks(comment.body)}</ReactMarkdown>
+                    {parseScheduleBlock(comment.body) && (
+                      <ScheduleDiagram schedule={parseScheduleBlock(comment.body)} />
+                    )}
+                    <MetaBlockBadges text={comment.body} />
+                  </div>
+                </div>
+              </div>
+            ))}
+            {commentsLoading && (
+              <div className="flex items-center justify-center py-4 gap-2 text-neutral-400 dark:text-neutral-500">
+                <RefreshCw className="w-4 h-4 animate-spin" /><span className="text-sm">Loading...</span>
+              </div>
+            )}
+          </div>
+        </PanelContent>
+      </Panel>
 
       {/* Login Modal */}
       <Modal open={loginModal} onClose={() => { setLoginModal(false); setLoginInput('') }}>
@@ -3086,6 +3176,8 @@ function App() {
           </div>
         </div>
       )}
+    </div>
+    <PanelSlot />
     </div>
   )
 }
