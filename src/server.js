@@ -15,6 +15,7 @@ import yaml from 'js-yaml';
 import Database from 'better-sqlite3';
 import { runAgentWithAPI } from './agent-runner.js';
 import { getProvider } from './providers/index.js';
+import { loadTokens as loadCodexTokens, clearTokens as clearCodexTokens, startDeviceCodeFlow, pollForToken, getAccessToken as getCodexAccessToken } from './oauth-codex.js';
 import webpush from 'web-push';
 import { config as loadDotenv } from 'dotenv';
 
@@ -63,6 +64,11 @@ const MODEL_TIERS = {
     high:  { model: 'minimax/MiniMax-M2.5' },
     mid:   { model: 'minimax/MiniMax-M2.5' },
     low:   { model: 'minimax/MiniMax-M2.5' },
+  },
+  'openai-codex': {
+    high:  { model: 'openai-codex/gpt-5.3-codex', reasoningEffort: 'xhigh' },
+    mid:   { model: 'openai-codex/gpt-5.3-codex', reasoningEffort: 'high' },
+    low:   { model: 'openai-codex/gpt-5.3-codex', reasoningEffort: 'medium' },
   },
 };
 
@@ -1700,6 +1706,8 @@ class ProjectRunner {
       provider = 'google';
     } else if (process.env.MINIMAX_API_KEY) {
       provider = 'minimax';
+    } else if (loadCodexTokens()?.access_token) {
+      provider = 'openai-codex';
     } else {
       provider = 'anthropic';
     }
@@ -1709,13 +1717,16 @@ class ProjectRunner {
     const agentModel = resolved.model;
     const reasoningEffort = resolved.reasoningEffort || null;
 
-    const isOpenAIModel = agentModel.startsWith('openai/') || agentModel.startsWith('gpt-') || agentModel.startsWith('o3') || agentModel.startsWith('o4-');
+    const isOpenAICodexModel = agentModel.startsWith('openai-codex/');
+    const isOpenAIModel = !isOpenAICodexModel && (agentModel.startsWith('openai/') || agentModel.startsWith('gpt-') || agentModel.startsWith('o3') || agentModel.startsWith('o4-'));
     const isGoogleModel = agentModel.startsWith('google/') || agentModel.startsWith('gemini-');
     const isMiniMaxModel = agentModel.startsWith('minimax/') || agentModel.startsWith('MiniMax-');
 
     let resolvedToken;
     if (projectToken) {
       resolvedToken = projectToken;
+    } else if (isOpenAICodexModel) {
+      resolvedToken = await getCodexAccessToken();
     } else if (isOpenAIModel) {
       resolvedToken = process.env.OPENAI_API_KEY || null;
     } else if (isGoogleModel) {
@@ -1966,6 +1977,7 @@ const server = http.createServer(async (req, res) => {
     const anthropicToken = process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_API_KEY || null;
     const openaiToken = process.env.OPENAI_API_KEY || null;
     const googleToken = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || null;
+    const codexTokens = loadCodexTokens();
     // Backward compat: hasGlobalToken and globalTokenPreview refer to Anthropic
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
@@ -1976,6 +1988,7 @@ const server = http.createServer(async (req, res) => {
         anthropic: { hasToken: !!anthropicToken, preview: anthropicToken ? maskToken(anthropicToken) : null },
         openai: { hasToken: !!openaiToken, preview: openaiToken ? maskToken(openaiToken) : null },
         google: { hasToken: !!googleToken, preview: googleToken ? maskToken(googleToken) : null },
+        'openai-codex': { hasToken: !!codexTokens?.access_token, type: 'oauth' },
       },
     }));
     return;
@@ -2031,6 +2044,7 @@ const server = http.createServer(async (req, res) => {
         const anthropicToken = process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_API_KEY || null;
         const openaiToken = process.env.OPENAI_API_KEY || null;
         const googleToken = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || null;
+        const codexTokens = loadCodexTokens();
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
           success: true,
@@ -2041,6 +2055,7 @@ const server = http.createServer(async (req, res) => {
             anthropic: { hasToken: !!anthropicToken, preview: anthropicToken ? maskToken(anthropicToken) : null },
             openai: { hasToken: !!openaiToken, preview: openaiToken ? maskToken(openaiToken) : null },
             google: { hasToken: !!googleToken, preview: googleToken ? maskToken(googleToken) : null },
+            'openai-codex': { hasToken: !!codexTokens?.access_token, type: 'oauth' },
           },
         }));
       } catch (e) {
@@ -2048,6 +2063,63 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ error: e.message }));
       }
     });
+    return;
+  }
+
+  // --- OpenAI Codex OAuth endpoints ---
+
+  if (req.method === 'POST' && url.pathname === '/api/openai-codex/login') {
+    if (!requireWrite(req, res)) return;
+    try {
+      const deviceCode = await startDeviceCodeFlow();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(deviceCode));
+
+      // Start polling in the background (non-blocking)
+      pollForToken(deviceCode.device_code, deviceCode.interval || 5, deviceCode.expires_in || 900)
+        .catch(() => {}); // Errors are non-fatal; user can retry
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: e.message }));
+    }
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/openai-codex/poll') {
+    if (!requireWrite(req, res)) return;
+    let body = '';
+    req.on('data', d => body += d);
+    req.on('end', async () => {
+      try {
+        const { device_code, interval, expires_in } = JSON.parse(body);
+        const tokens = await pollForToken(device_code, interval || 5, expires_in || 900);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, authenticated: true }));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/openai-codex/status') {
+    const tokens = loadCodexTokens();
+    const authenticated = !!tokens?.access_token;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      authenticated,
+      expires_at: tokens?.expires_at || null,
+      has_refresh_token: !!tokens?.refresh_token,
+    }));
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/openai-codex/logout') {
+    if (!requireWrite(req, res)) return;
+    clearCodexTokens();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: true }));
     return;
   }
 
@@ -2502,7 +2574,7 @@ const server = http.createServer(async (req, res) => {
       const safeConfig = { ...config };
       delete safeConfig.setupToken;
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      const detectedProvider = config.setupTokenProvider || (projectToken ? detectProviderFromToken(projectToken) : null) || (process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_API_KEY ? 'anthropic' : process.env.OPENAI_API_KEY ? 'openai' : 'anthropic');
+      const detectedProvider = config.setupTokenProvider || (projectToken ? detectProviderFromToken(projectToken) : null) || (process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_API_KEY ? 'anthropic' : process.env.OPENAI_API_KEY ? 'openai' : loadCodexTokens()?.access_token ? 'openai-codex' : 'anthropic');
       res.end(JSON.stringify({ config: safeConfig, raw, hasProjectToken, projectTokenPreview: projectToken ? maskToken(projectToken) : null, provider: detectedProvider, tiers: MODEL_TIERS[detectedProvider] || {}, allTiers: MODEL_TIERS }));
       return;
     }
@@ -2672,6 +2744,7 @@ const server = http.createServer(async (req, res) => {
         else if (process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_API_KEY) providerName = 'anthropic';
         else if (process.env.OPENAI_API_KEY) providerName = 'openai';
         else if (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY) providerName = 'google';
+        else if (loadCodexTokens()?.access_token) providerName = 'openai-codex';
         else providerName = 'anthropic';
 
         const resolved = resolveModelTier('low', providerName);
@@ -2680,6 +2753,7 @@ const server = http.createServer(async (req, res) => {
         // Resolve token same as runAgent
         let token;
         if (projectToken) { token = projectToken; }
+        else if (model.startsWith('openai-codex/')) { token = await getCodexAccessToken(); }
         else if (model.startsWith('openai/') || model.startsWith('gpt-')) { token = process.env.OPENAI_API_KEY; }
         else if (model.startsWith('gemini-') || model.startsWith('google/')) { token = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY; }
         else { token = process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_API_KEY; }
