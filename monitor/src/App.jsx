@@ -159,14 +159,12 @@ function App() {
   const [showApiKeyHelp, setShowApiKeyHelp] = useState(false)
   const [codexLoginState, setCodexLoginState] = useState(null) // null | { verification_uri_complete, user_code, device_code, interval, expires_in } | 'polling' | 'success' | 'error'
 
-  // Check codex auth status when modal opens
+  // Check codex auth status on mount
   useEffect(() => {
-    if (showApiKeyHelp) {
-      fetch('/api/openai-codex/status').then(r => r.json()).then(d => {
-        if (d.authenticated) setCodexLoginState('success')
-      }).catch(() => {})
-    }
-  }, [showApiKeyHelp])
+    fetch('/api/openai-codex/status').then(r => r.json()).then(d => {
+      if (d.authenticated) setCodexLoginState('success')
+    }).catch(() => {})
+  }, [])
   const [notificationsEnabled, setNotificationsEnabled] = useState(() => localStorage.getItem('tbc_notifications') === 'true')
   const [reportsPanelOpen, setReportsPanelOpen] = useState(false)
   const [focusedReportId, setFocusedReportId] = useState(null)
@@ -1339,6 +1337,66 @@ function App() {
                   </div>
                 )
               })}
+              {/* OpenAI Codex (ChatGPT OAuth) */}
+              <div className="flex items-center justify-between text-xs py-1">
+                <span className={codexLoginState === 'success' ? 'text-green-600 dark:text-green-400' : 'text-neutral-400 dark:text-neutral-500'}>
+                  {codexLoginState === 'success' ? '✓' : '○'} OpenAI Codex (ChatGPT)
+                </span>
+                {codexLoginState === 'success' ? (
+                  <button
+                    onClick={async () => {
+                      await authFetch('/api/openai-codex/logout', { method: 'POST' })
+                      setCodexLoginState(null)
+                      setToast('ChatGPT account disconnected')
+                    }}
+                    className="text-red-500 hover:text-red-700 text-xs"
+                  >
+                    Disconnect
+                  </button>
+                ) : codexLoginState && typeof codexLoginState === 'object' ? (
+                  <span className="text-xs text-blue-500 animate-pulse">Waiting for sign-in...</span>
+                ) : (
+                  <button
+                    onClick={async () => {
+                      try {
+                        setCodexLoginState('polling')
+                        const res = await authFetch('/api/openai-codex/login', { method: 'POST' })
+                        if (!res.ok) throw new Error('Failed')
+                        const data = await res.json()
+                        setCodexLoginState(data)
+                        window.open(data.verification_uri_complete || data.verification_uri, '_blank')
+                        const pollInterval = setInterval(async () => {
+                          try {
+                            const statusRes = await fetch('/api/openai-codex/status')
+                            const status = await statusRes.json()
+                            if (status.authenticated) {
+                              clearInterval(pollInterval)
+                              setCodexLoginState('success')
+                              setToast('ChatGPT account connected')
+                            }
+                          } catch {}
+                        }, (data.interval || 5) * 1000)
+                        setTimeout(() => {
+                          clearInterval(pollInterval)
+                          setCodexLoginState(prev => prev === 'success' ? prev : 'error')
+                        }, (data.expires_in || 900) * 1000)
+                      } catch {
+                        setCodexLoginState('error')
+                      }
+                    }}
+                    disabled={codexLoginState === 'polling'}
+                    className="text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 text-xs"
+                  >
+                    {codexLoginState === 'polling' ? 'Starting...' : codexLoginState === 'error' ? 'Retry Login' : 'Login'}
+                  </button>
+                )}
+              </div>
+              {codexLoginState && typeof codexLoginState === 'object' && (
+                <div className="mt-2 p-2 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-xs">
+                  <p className="text-blue-700 dark:text-blue-300 mb-1">Sign in at the page that just opened. If prompted, enter code:</p>
+                  <code className="bg-blue-100 dark:bg-blue-900/40 px-2 py-0.5 rounded font-bold text-sm">{codexLoginState.user_code}</code>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -3104,76 +3162,13 @@ function App() {
 
             <div>
               <h3 className="font-semibold text-neutral-800 dark:text-neutral-100 mb-1">OpenAI Codex — ChatGPT Subscription</h3>
-              <p className="text-neutral-600 dark:text-neutral-400 mb-2">Use your ChatGPT Plus or Pro subscription instead of paying per-token API costs. No API key needed — you sign in with your ChatGPT account.</p>
-              {codexLoginState === 'success' ? (
-                <div className="p-3 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
-                  <p className="text-green-700 dark:text-green-400 font-medium">✓ Connected to ChatGPT</p>
-                  <p className="text-xs text-green-600 dark:text-green-500 mt-1">Select any <code className="bg-green-100 dark:bg-green-900/40 px-1 rounded">openai-codex</code> model in your project settings.</p>
-                </div>
-              ) : codexLoginState && typeof codexLoginState === 'object' ? (
-                <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 space-y-2">
-                  <p className="text-blue-700 dark:text-blue-300 font-medium">Step 1: Open this link and sign in with your ChatGPT account:</p>
-                  <a href={codexLoginState.verification_uri_complete || codexLoginState.verification_uri} target="_blank" rel="noopener noreferrer" className="block text-blue-600 dark:text-blue-400 underline font-mono text-xs break-all">{codexLoginState.verification_uri_complete || codexLoginState.verification_uri}</a>
-                  {codexLoginState.user_code && (
-                    <p className="text-blue-700 dark:text-blue-300">Step 2: If prompted, enter code: <code className="bg-blue-100 dark:bg-blue-900/40 px-2 py-0.5 rounded font-bold text-base">{codexLoginState.user_code}</code></p>
-                  )}
-                  <p className="text-xs text-blue-500 dark:text-blue-400 animate-pulse">⏳ Waiting for you to sign in...</p>
-                </div>
-              ) : codexLoginState === 'error' ? (
-                <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
-                  <p className="text-red-700 dark:text-red-400">Login failed or timed out. Try again.</p>
-                </div>
-              ) : null}
-              <div className="mt-2 flex gap-2">
-                <button
-                  onClick={async () => {
-                    try {
-                      setCodexLoginState('polling')
-                      const res = await authFetch('/api/openai-codex/login', { method: 'POST' })
-                      if (!res.ok) throw new Error('Failed to start login')
-                      const data = await res.json()
-                      setCodexLoginState(data)
-                      // Open the verification URL automatically
-                      window.open(data.verification_uri_complete || data.verification_uri, '_blank')
-                      // Poll for completion
-                      const pollInterval = setInterval(async () => {
-                        try {
-                          const statusRes = await fetch('/api/openai-codex/status')
-                          const status = await statusRes.json()
-                          if (status.authenticated) {
-                            clearInterval(pollInterval)
-                            setCodexLoginState('success')
-                            setToast('ChatGPT account connected')
-                          }
-                        } catch {}
-                      }, (data.interval || 5) * 1000)
-                      // Stop polling after expiry
-                      setTimeout(() => {
-                        clearInterval(pollInterval)
-                        setCodexLoginState(prev => prev === 'success' ? prev : 'error')
-                      }, (data.expires_in || 900) * 1000)
-                    } catch {
-                      setCodexLoginState('error')
-                    }
-                  }}
-                  disabled={codexLoginState === 'polling' || (codexLoginState && typeof codexLoginState === 'object')}
-                  className="px-3 py-1.5 text-sm font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
-                >
-                  {codexLoginState === 'polling' ? 'Starting...' : codexLoginState && typeof codexLoginState === 'object' ? 'Waiting for sign-in...' : 'Login with ChatGPT'}
-                </button>
-                {codexLoginState === 'success' && (
-                  <button
-                    onClick={async () => {
-                      await authFetch('/api/openai-codex/logout', { method: 'POST' })
-                      setCodexLoginState(null)
-                      setToast('ChatGPT account disconnected')
-                    }}
-                    className="px-3 py-1.5 text-sm text-red-500 hover:text-red-700"
-                  >
-                    Disconnect
-                  </button>
-                )}
-              </div>
+              <p className="text-neutral-600 dark:text-neutral-400">Use your ChatGPT Plus or Pro subscription instead of paying per-token API costs. No API key needed.</p>
+              <ol className="list-decimal list-inside space-y-1 text-neutral-600 dark:text-neutral-400 mt-1">
+                <li>Go to the <strong>Models</strong> section in global or project settings</li>
+                <li>Click <strong>Login</strong> next to "OpenAI Codex (ChatGPT)"</li>
+                <li>A browser tab will open — sign in with your ChatGPT account</li>
+                <li>Once connected, select <code className="bg-neutral-100 dark:bg-neutral-700 px-1 rounded">openai-codex</code> models in your project</li>
+              </ol>
             </div>
 
             <div>
