@@ -158,13 +158,25 @@ function App() {
   const [budgetInfoModal, setBudgetInfoModal] = useState(false)
   const [showApiKeyHelp, setShowApiKeyHelp] = useState(false)
   const [codexLoginState, setCodexLoginState] = useState(null) // null | { verification_uri_complete, user_code, device_code, interval, expires_in } | 'polling' | 'success' | 'error'
+  const [projectCodexLoginState, setProjectCodexLoginState] = useState(null)
 
-  // Check codex auth status on mount
+  // Check codex auth status on mount (global)
   useEffect(() => {
     fetch('/api/openai-codex/status').then(r => r.json()).then(d => {
       if (d.authenticated) setCodexLoginState('success')
     }).catch(() => {})
   }, [])
+
+  // Check project-level codex auth when project changes
+  useEffect(() => {
+    if (selectedProject?.id) {
+      fetch(`/api/openai-codex/status?project=${encodeURIComponent(selectedProject.id)}`).then(r => r.json()).then(d => {
+        setProjectCodexLoginState(d.authenticated ? 'success' : null)
+      }).catch(() => setProjectCodexLoginState(null))
+    } else {
+      setProjectCodexLoginState(null)
+    }
+  }, [selectedProject?.id])
   const [notificationsEnabled, setNotificationsEnabled] = useState(() => localStorage.getItem('tbc_notifications') === 'true')
   const [reportsPanelOpen, setReportsPanelOpen] = useState(false)
   const [focusedReportId, setFocusedReportId] = useState(null)
@@ -1571,6 +1583,70 @@ function App() {
                 </button>
               </div>
             </div>
+            {/* OpenAI Codex (ChatGPT OAuth) — per-project */}
+            <div className="flex items-center justify-between text-xs py-1 mt-2 pt-2 border-t border-neutral-100 dark:border-neutral-700/50">
+              <span className={projectCodexLoginState === 'success' ? 'text-green-600 dark:text-green-400' : 'text-neutral-400 dark:text-neutral-500'}>
+                {projectCodexLoginState === 'success' ? '✓' : '○'} OpenAI Codex (ChatGPT)
+              </span>
+              {projectCodexLoginState === 'success' ? (
+                <button
+                  onClick={async () => {
+                    await authFetch(`/api/openai-codex/logout?project=${encodeURIComponent(selectedProject.id)}`, { method: 'POST' })
+                    setProjectCodexLoginState(null)
+                    setToast('Project ChatGPT account disconnected')
+                  }}
+                  className="text-red-500 hover:text-red-700 text-xs"
+                >
+                  Disconnect
+                </button>
+              ) : projectCodexLoginState && typeof projectCodexLoginState === 'object' ? (
+                <span className="text-xs text-blue-500 animate-pulse">Waiting for sign-in...</span>
+              ) : (
+                <button
+                  onClick={async () => {
+                    if (!selectedProject?.id) return
+                    try {
+                      setProjectCodexLoginState('polling')
+                      const res = await authFetch(`/api/openai-codex/login?project=${encodeURIComponent(selectedProject.id)}`, { method: 'POST' })
+                      if (!res.ok) throw new Error('Failed')
+                      const data = await res.json()
+                      setProjectCodexLoginState(data)
+                      window.open(data.verification_uri_complete || data.verification_uri, '_blank')
+                      const pollInterval = setInterval(async () => {
+                        try {
+                          const statusRes = await fetch(`/api/openai-codex/status?project=${encodeURIComponent(selectedProject.id)}`)
+                          const status = await statusRes.json()
+                          if (status.authenticated) {
+                            clearInterval(pollInterval)
+                            setProjectCodexLoginState('success')
+                            setToast('Project ChatGPT account connected')
+                          }
+                        } catch {}
+                      }, (data.interval || 5) * 1000)
+                      setTimeout(() => {
+                        clearInterval(pollInterval)
+                        setProjectCodexLoginState(prev => prev === 'success' ? prev : null)
+                      }, (data.expires_in || 900) * 1000)
+                    } catch {
+                      setProjectCodexLoginState(null)
+                    }
+                  }}
+                  disabled={projectCodexLoginState === 'polling'}
+                  className="text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 text-xs"
+                >
+                  {projectCodexLoginState === 'polling' ? 'Starting...' : 'Login'}
+                </button>
+              )}
+            </div>
+            {projectCodexLoginState && typeof projectCodexLoginState === 'object' && (
+              <div className="mt-2 p-2 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-xs">
+                <p className="text-blue-700 dark:text-blue-300 mb-1">Sign in at the page that just opened. If prompted, enter code:</p>
+                <code className="bg-blue-100 dark:bg-blue-900/40 px-2 py-0.5 rounded font-bold text-sm">{projectCodexLoginState.user_code}</code>
+              </div>
+            )}
+            <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-2">
+              {codexLoginState === 'success' && projectCodexLoginState !== 'success' ? 'Using global ChatGPT login' : ''}
+            </p>
           </div>
         </div>
 

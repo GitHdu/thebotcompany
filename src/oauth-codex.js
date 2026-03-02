@@ -15,7 +15,11 @@ const AUDIENCE = 'https://api.openai.com/v1';
 const SCOPE = 'openid profile email offline_access';
 
 const TBC_HOME = process.env.TBC_HOME || path.join(process.env.HOME, '.thebotcompany');
-const AUTH_FILE = path.join(TBC_HOME, 'openai-codex-auth.json');
+
+function authFilePath(projectId) {
+  if (projectId) return path.join(TBC_HOME, `openai-codex-auth-${projectId}.json`);
+  return path.join(TBC_HOME, 'openai-codex-auth.json');
+}
 
 // ---------------------------------------------------------------------------
 // Low-level HTTPS POST helper (no external deps)
@@ -50,22 +54,23 @@ function post(hostname, urlPath, body) {
 // Token persistence
 // ---------------------------------------------------------------------------
 
-export function loadTokens() {
+export function loadTokens(projectId) {
   try {
-    const raw = fs.readFileSync(AUTH_FILE, 'utf-8');
+    const raw = fs.readFileSync(authFilePath(projectId), 'utf-8');
     return JSON.parse(raw);
   } catch {
     return null;
   }
 }
 
-export function saveTokens(tokens) {
-  fs.mkdirSync(path.dirname(AUTH_FILE), { recursive: true });
-  fs.writeFileSync(AUTH_FILE, JSON.stringify(tokens, null, 2), { mode: 0o600 });
+export function saveTokens(tokens, projectId) {
+  const fp = authFilePath(projectId);
+  fs.mkdirSync(path.dirname(fp), { recursive: true });
+  fs.writeFileSync(fp, JSON.stringify(tokens, null, 2), { mode: 0o600 });
 }
 
-export function clearTokens() {
-  try { fs.unlinkSync(AUTH_FILE); } catch {}
+export function clearTokens(projectId) {
+  try { fs.unlinkSync(authFilePath(projectId)); } catch {}
 }
 
 // ---------------------------------------------------------------------------
@@ -96,7 +101,7 @@ export async function startDeviceCodeFlow() {
  * @param {number} expiresIn  - timeout in seconds
  * @returns {Promise<Object>} token response { access_token, refresh_token, ... }
  */
-export async function pollForToken(deviceCode, interval = 5, expiresIn = 900) {
+export async function pollForToken(deviceCode, interval = 5, expiresIn = 900, projectId = null) {
   const deadline = Date.now() + expiresIn * 1000;
 
   while (Date.now() < deadline) {
@@ -114,7 +119,7 @@ export async function pollForToken(deviceCode, interval = 5, expiresIn = 900) {
         refresh_token: body.refresh_token || null,
         expires_at: body.expires_in ? Date.now() + body.expires_in * 1000 : null,
       };
-      saveTokens(tokens);
+      saveTokens(tokens, projectId);
       return tokens;
     }
 
@@ -139,7 +144,7 @@ export async function pollForToken(deviceCode, interval = 5, expiresIn = 900) {
  * Refresh the access token using the stored refresh token.
  * Updates the auth file on success. Throws on failure.
  */
-export async function refreshAccessToken(refreshToken) {
+export async function refreshAccessToken(refreshToken, projectId = null) {
   const { status, body } = await post(AUTH0_DOMAIN, '/oauth/token', {
     grant_type: 'refresh_token',
     client_id: CLIENT_ID,
@@ -155,7 +160,7 @@ export async function refreshAccessToken(refreshToken) {
     refresh_token: body.refresh_token || refreshToken,
     expires_at: body.expires_in ? Date.now() + body.expires_in * 1000 : null,
   };
-  saveTokens(tokens);
+  saveTokens(tokens, projectId);
   return tokens;
 }
 
@@ -165,22 +170,31 @@ export async function refreshAccessToken(refreshToken) {
 
 /**
  * Returns a current access token, refreshing if expired.
- * Returns null if no tokens are stored.
+ * Checks project-level tokens first, then falls back to global.
+ * @param {string|null} projectId - optional project scope
+ * @returns {Promise<string|null>}
  */
-export async function getAccessToken() {
-  const tokens = loadTokens();
-  if (!tokens?.access_token) return null;
+export async function getAccessToken(projectId = null) {
+  // Try project-level first, then fall back to global
+  const scopes = projectId ? [projectId, null] : [null];
 
-  // Refresh if token expires within 60 seconds
-  if (tokens.expires_at && Date.now() > tokens.expires_at - 60_000) {
-    if (!tokens.refresh_token) return null;
-    try {
-      const refreshed = await refreshAccessToken(tokens.refresh_token);
-      return refreshed.access_token;
-    } catch {
-      return null;
+  for (const scope of scopes) {
+    const tokens = loadTokens(scope);
+    if (!tokens?.access_token) continue;
+
+    // Refresh if token expires within 60 seconds
+    if (tokens.expires_at && Date.now() > tokens.expires_at - 60_000) {
+      if (!tokens.refresh_token) continue;
+      try {
+        const refreshed = await refreshAccessToken(tokens.refresh_token, scope);
+        return refreshed.access_token;
+      } catch {
+        continue;
+      }
     }
+
+    return tokens.access_token;
   }
 
-  return tokens.access_token;
+  return null;
 }

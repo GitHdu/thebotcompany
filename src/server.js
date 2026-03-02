@@ -1706,7 +1706,7 @@ class ProjectRunner {
       provider = 'google';
     } else if (process.env.MINIMAX_API_KEY) {
       provider = 'minimax';
-    } else if (loadCodexTokens()?.access_token) {
+    } else if (loadCodexTokens(this.id)?.access_token || loadCodexTokens()?.access_token) {
       provider = 'openai-codex';
     } else {
       provider = 'anthropic';
@@ -1726,7 +1726,7 @@ class ProjectRunner {
     if (projectToken) {
       resolvedToken = projectToken;
     } else if (isOpenAICodexModel) {
-      resolvedToken = await getCodexAccessToken();
+      resolvedToken = await getCodexAccessToken(this.id);
     } else if (isOpenAIModel) {
       resolvedToken = process.env.OPENAI_API_KEY || null;
     } else if (isGoogleModel) {
@@ -2070,13 +2070,14 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'POST' && url.pathname === '/api/openai-codex/login') {
     if (!requireWrite(req, res)) return;
+    const projectId = url.searchParams.get('project') || null;
     try {
       const deviceCode = await startDeviceCodeFlow();
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(deviceCode));
 
       // Start polling in the background (non-blocking)
-      pollForToken(deviceCode.device_code, deviceCode.interval || 5, deviceCode.expires_in || 900)
+      pollForToken(deviceCode.device_code, deviceCode.interval || 5, deviceCode.expires_in || 900, projectId)
         .catch(() => {}); // Errors are non-fatal; user can retry
     } catch (e) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -2087,12 +2088,13 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'POST' && url.pathname === '/api/openai-codex/poll') {
     if (!requireWrite(req, res)) return;
+    const projectId = url.searchParams.get('project') || null;
     let body = '';
     req.on('data', d => body += d);
     req.on('end', async () => {
       try {
         const { device_code, interval, expires_in } = JSON.parse(body);
-        const tokens = await pollForToken(device_code, interval || 5, expires_in || 900);
+        const tokens = await pollForToken(device_code, interval || 5, expires_in || 900, projectId);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true, authenticated: true }));
       } catch (e) {
@@ -2104,7 +2106,8 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/openai-codex/status') {
-    const tokens = loadCodexTokens();
+    const projectId = url.searchParams.get('project') || null;
+    const tokens = loadCodexTokens(projectId);
     const authenticated = !!tokens?.access_token;
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
@@ -2117,7 +2120,8 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'POST' && url.pathname === '/api/openai-codex/logout') {
     if (!requireWrite(req, res)) return;
-    clearCodexTokens();
+    const projectId = url.searchParams.get('project') || null;
+    clearCodexTokens(projectId);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ success: true }));
     return;
