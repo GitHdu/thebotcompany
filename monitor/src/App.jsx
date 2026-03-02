@@ -158,6 +158,21 @@ function App() {
   const [budgetInfoModal, setBudgetInfoModal] = useState(false)
   const [notificationsEnabled, setNotificationsEnabled] = useState(() => localStorage.getItem('tbc_notifications') === 'true')
   const [reportsPanelOpen, setReportsPanelOpen] = useState(false)
+  const [focusedReportId, setFocusedReportId] = useState(null)
+  
+  // Scroll to focused report when panel opens
+  useEffect(() => {
+    if (reportsPanelOpen && focusedReportId) {
+      const timer = setTimeout(() => {
+        const el = document.querySelector(`[data-report-id="${focusedReportId}"]`)
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        // Clear highlight after animation
+        const clearTimer = setTimeout(() => setFocusedReportId(null), 2000)
+        return () => clearTimeout(clearTimer)
+      }, 350) // wait for panel open animation
+      return () => clearTimeout(timer)
+    }
+  }, [reportsPanelOpen, focusedReportId])
   const [notifCenter, setNotifCenter] = useState(false)
   const [notifList, setNotifList] = useState([])
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -2561,7 +2576,7 @@ function App() {
                       <div
                         key={comment.id}
                         className="py-2.5 hover:bg-neutral-50 dark:hover:bg-neutral-800/50 cursor-pointer transition-colors -mx-1 px-1 rounded"
-                        onClick={() => setReportsPanelOpen(true)}
+                        onClick={() => { setFocusedReportId(comment.id); setReportsPanelOpen(true); }}
                       >
                         <div className="flex items-center gap-2 mb-0.5">
                           <Avatar className="w-5 h-5">
@@ -3249,9 +3264,9 @@ function App() {
           <div ref={reportsScrollRef}>
             {comments.length === 0 && !commentsLoading && <p className="text-sm text-neutral-400 dark:text-neutral-500 text-center py-8">No reports found</p>}
             {comments.map((comment, idx) => (
-              <div key={comment.id}>
+              <div key={comment.id} data-report-id={comment.id}>
                 {idx > 0 && <Separator className="my-4" />}
-                <div>
+                <div className={`rounded-lg transition-colors duration-700 ${focusedReportId === comment.id ? 'bg-blue-50 dark:bg-blue-950/30 ring-1 ring-blue-300 dark:ring-blue-700 p-2 -m-2' : ''}`}>
                   <div className="flex items-center gap-2 mb-1 flex-wrap">
                     <Avatar className="w-6 h-6 sm:w-8 sm:h-8">
                       <AvatarFallback className="bg-gradient-to-br from-blue-400 to-purple-500 text-white text-xs">
