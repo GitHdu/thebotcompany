@@ -214,7 +214,8 @@ function App() {
   // Auto-scroll live log to bottom when new entries arrive
   useEffect(() => {
     if (liveLogEndRef.current) {
-      liveLogEndRef.current.scrollIntoView({ behavior: 'smooth' })
+      const container = liveLogEndRef.current.parentElement
+      if (container) container.scrollTop = container.scrollHeight
     }
   }, [liveAgentLog?.log?.length])
 
@@ -3579,34 +3580,37 @@ function App() {
           }}>
           <div ref={reportsScrollRef}>
             {liveAgentLog && (
-              <div data-report-id="live" className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3 mb-4">
-                <div className="flex items-center gap-2 mb-2 flex-wrap">
-                  <Avatar className="w-6 h-6 sm:w-8 sm:h-8">
-                    <AvatarFallback className="bg-gradient-to-br from-green-400 to-emerald-500 text-white text-xs">
-                      {liveAgentLog.agent.slice(0, 2).toUpperCase()}
-                    </AvatarFallback>
-                  </Avatar>
-                  <span className="text-sm font-semibold text-neutral-800 dark:text-neutral-100 capitalize">{liveAgentLog.agent}</span>
-                  <span className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
-                    <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                    Running
-                  </span>
-                  <span className="text-xs text-neutral-400 dark:text-neutral-500 flex items-center gap-1.5">
-                    <LiveDuration startTime={liveAgentLog.startTime} />
-                  </span>
-                  {liveAgentLog.model && <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">{liveAgentLog.model}</Badge>}
+              <>
+                <div data-report-id="live">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
+                    <Avatar className="w-6 h-6 sm:w-8 sm:h-8">
+                      <AvatarFallback className="bg-gradient-to-br from-blue-400 to-purple-500 text-white text-xs">
+                        {liveAgentLog.agent.slice(0, 2).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                    <span className="text-sm font-semibold text-neutral-800 dark:text-neutral-100 capitalize">{liveAgentLog.agent}</span>
+                    <span className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
+                      <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                      Running
+                    </span>
+                    <span className="text-xs text-neutral-400 dark:text-neutral-500">
+                      <LiveDuration startTime={liveAgentLog.startTime} />
+                    </span>
+                    {liveAgentLog.model && <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">{liveAgentLog.model}</Badge>}
+                  </div>
+                  <div className="max-h-[400px] overflow-y-auto rounded bg-neutral-50 dark:bg-neutral-900/50 p-2 text-xs font-mono space-y-0.5 mt-1">
+                    {liveAgentLog.log.length === 0 && <p className="text-neutral-400 italic">Waiting for output...</p>}
+                    {liveAgentLog.log.map((entry, i) => (
+                      <div key={i} className={`leading-relaxed break-words whitespace-pre-wrap ${entry.msg.startsWith('Tool:') ? 'text-blue-600 dark:text-blue-400' : 'text-neutral-600 dark:text-neutral-300'}`}>
+                        <span className="text-neutral-400 dark:text-neutral-500 mr-1.5">{new Date(entry.time).toLocaleTimeString()}</span>
+                        {entry.msg}
+                      </div>
+                    ))}
+                    <div ref={liveLogEndRef} />
+                  </div>
                 </div>
-                <div className="max-h-[400px] overflow-y-auto rounded bg-white/50 dark:bg-neutral-900/50 p-2 text-xs font-mono space-y-0.5">
-                  {liveAgentLog.log.length === 0 && <p className="text-neutral-400 italic">Waiting for output...</p>}
-                  {liveAgentLog.log.map((entry, i) => (
-                    <div key={i} className={`leading-relaxed ${entry.msg.startsWith('Tool:') ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/30 px-1 rounded' : 'text-neutral-600 dark:text-neutral-300'}`}>
-                      <span className="text-neutral-400 dark:text-neutral-500 mr-1.5">{new Date(entry.time).toLocaleTimeString()}</span>
-                      {entry.msg}
-                    </div>
-                  ))}
-                  <div ref={liveLogEndRef} />
-                </div>
-              </div>
+                <Separator className="my-4" />
+              </>
             )}
             {comments.length === 0 && !commentsLoading && !liveAgentLog && <p className="text-sm text-neutral-400 dark:text-neutral-500 text-center py-8">No reports found</p>}
             {comments.map((comment, idx) => (
