@@ -212,12 +212,7 @@ function App() {
   }, [reportsPanelOpen, focusedReportId])
 
   // Auto-scroll live log to bottom when new entries arrive
-  const liveLogContainerRef = useRef(null)
-  useEffect(() => {
-    if (liveLogContainerRef.current) {
-      liveLogContainerRef.current.scrollTop = liveLogContainerRef.current.scrollHeight
-    }
-  })
+
 
   const [notifCenter, setNotifCenter] = useState(false)
   const [notifList, setNotifList] = useState([])
@@ -3598,7 +3593,7 @@ function App() {
                     </span>
                     {liveAgentLog.model && <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">{liveAgentLog.model}</Badge>}
                   </div>
-                  <div ref={liveLogContainerRef} className="max-h-[400px] overflow-y-auto rounded bg-neutral-50 dark:bg-neutral-900/50 p-2 text-xs font-mono space-y-0.5 mt-1">
+                  <div ref={(el) => { if (el) el.scrollTop = el.scrollHeight }} className="max-h-[400px] overflow-y-auto rounded bg-neutral-50 dark:bg-neutral-900/50 p-2 text-xs font-mono space-y-0.5 mt-1">
                     {liveAgentLog.log.length === 0 && <p className="text-neutral-400 italic">Waiting for output...</p>}
                     {liveAgentLog.log.map((entry, i) => (
                       <div key={i} className={`leading-relaxed break-words whitespace-pre-wrap ${entry.msg.startsWith('Tool:') ? 'text-blue-600 dark:text-blue-400' : 'text-neutral-600 dark:text-neutral-300'}`}>
