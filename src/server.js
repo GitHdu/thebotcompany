@@ -1501,6 +1501,12 @@ class ProjectRunner {
         }
       }
 
+      // If no agent succeeded, don't count this cycle
+      if (cycleTotal > 0 && cycleFailures === cycleTotal) {
+        this.cycleCount--;
+        this.saveState();
+      }
+
       // Track consecutive agent failures — auto-pause after 10
       this.consecutiveFailures = (cycleTotal > 0 && cycleFailures === cycleTotal)
         ? this.consecutiveFailures + cycleFailures
