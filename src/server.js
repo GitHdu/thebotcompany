@@ -48,6 +48,18 @@ function detectTokenProvider(token) {
   return 'unknown';
 }
 
+// Parse retry cooldown from rate-limit error messages
+function parseSummarizeCooldown(message) {
+  if (!message) return 60_000;
+  const minMatch = message.match(/~?(\d+)\s*min/i);
+  if (minMatch) return parseInt(minMatch[1]) * 60_000;
+  const hourMatch = message.match(/(\d+)\s*h(?:ours?)?/i);
+  if (hourMatch) return parseInt(hourMatch[1]) * 3600_000;
+  const secMatch = message.match(/(\d+)\s*s(?:ec(?:onds?)?)?/i);
+  if (secMatch) return parseInt(secMatch[1]) * 1000;
+  return 60_000;
+}
+
 // Model tier system — maps abstract tiers to provider-specific models
 const MODEL_TIERS = {
   anthropic: {
@@ -1788,7 +1800,7 @@ class ProjectRunner {
       allowedRepo: this.repo || null,
       abortSignal: runAbortController.signal,
       keyId: resolvedKeyId,
-      onRateLimited: (kid) => markRateLimited(kid, 60_000),
+      onRateLimited: (kid, cooldownMs) => markRateLimited(kid, cooldownMs || 60_000),
       resolveNewToken: async () => {
         const newKey = await resolveKeyForProject(config, providerHint, oauthTokenGetter);
         if (newKey?.provider && newKey.provider !== providerHint) {
@@ -3053,6 +3065,12 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ summary }));
       } catch (e) {
         log(`Summarize error: ${e.message}`, runner.id);
+        // Mark key as rate-limited if the error indicates a usage/rate limit
+        if (keyResult?.keyId && /rate.limit|usage.limit|quota|429/i.test(e.message)) {
+          const cooldownMs = parseSummarizeCooldown(e.message);
+          markRateLimited(keyResult.keyId, cooldownMs);
+          log(`Summarize: marked key ${keyResult.keyId} rate-limited for ${Math.ceil(cooldownMs / 60_000)}m`, runner.id);
+        }
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: e.message }));
       }
