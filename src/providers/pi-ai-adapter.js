@@ -88,12 +88,9 @@ export function formatTools(canonicalTools) {
 /**
  * Build pi-ai options from TBC parameters.
  */
-function buildOptions({ token, isOAuth, reasoningEffort, signal }) {
+function buildOptions({ token, isOAuth, reasoningEffort, signal, provider }) {
   const opts = {};
 
-  if (token) {
-    opts.apiKey = token;
-  }
   if (signal) {
     opts.signal = signal;
   }
@@ -103,14 +100,21 @@ function buildOptions({ token, isOAuth, reasoningEffort, signal }) {
     opts.reasoning = reasoningEffort; // pi-ai accepts: 'minimal'|'low'|'medium'|'high'|'xhigh'
   }
 
-  // Anthropic OAuth needs custom headers
-  if (isOAuth) {
+  if (isOAuth && provider === 'anthropic') {
+    // Anthropic OAuth needs Bearer auth + custom headers
+    // The SDK sends apiKey as x-api-key, so we override with Authorization header
+    opts.apiKey = token;
     opts.headers = {
-      'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14',
+      'Authorization': `Bearer ${token}`,
+      'x-api-key': '',  // Clear the x-api-key header
+      'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20',
       'user-agent': 'claude-cli/2.1.2 (external, cli)',
       'x-app': 'cli',
       'anthropic-dangerous-direct-browser-access': 'true',
     };
+  } else if (token) {
+    // For OpenAI/Google/etc, apiKey is sent as Authorization: Bearer natively
+    opts.apiKey = token;
   }
 
   return opts;
@@ -137,6 +141,16 @@ export async function callModel(piModel, systemPrompt, messages, tools, opts = {
 
   const assistantMsg = await completeSimple(piModel, context, piOpts);
 
+  // pi-ai returns error responses instead of throwing — surface them as exceptions
+  if (assistantMsg.stopReason === 'error' || assistantMsg.stopReason === 'aborted') {
+    const errMsg = assistantMsg.errorMessage || `API call failed (stopReason: ${assistantMsg.stopReason})`;
+    const err = new Error(errMsg);
+    // Try to extract HTTP status from the error message for retry logic
+    const statusMatch = errMsg.match(/status(?:\s+code)?:?\s*(\d{3})/i);
+    if (statusMatch) err.status = parseInt(statusMatch[1], 10);
+    throw err;
+  }
+
   return normalizeResponse(assistantMsg);
 }
 
@@ -160,13 +174,11 @@ function normalizeResponse(assistantMsg) {
     // thinking blocks are handled internally by pi-ai
   }
 
-  // Map stop reasons
+  // Map stop reasons (error/aborted are caught in callModel before reaching here)
   const stopReasonMap = {
     stop: 'end_turn',
     toolUse: 'tool_use',
     length: 'max_tokens',
-    error: 'end_turn',
-    aborted: 'end_turn',
   };
 
   return {

@@ -1,47 +1,413 @@
 import React, { useState, useEffect } from 'react'
-import { Sun, Moon, Monitor, Info, ChevronUp, ChevronDown, Trash2, Plus } from 'lucide-react'
+import { Sun, Moon, Monitor, Info, ChevronUp, ChevronDown, Trash2, Plus, X, ChevronRight, ArrowLeft } from 'lucide-react'
 import { Panel, PanelHeader, PanelContent } from '@/components/ui/panel'
+import ProviderSelector, { PROVIDERS, ProviderBadge } from '@/components/ui/ProviderSelector'
 
 import { useAuth } from '@/hooks/useAuth'
 import { useNotifications } from '@/contexts/NotificationContext'
 import { useToast } from '@/contexts/ToastContext'
 
-const PROVIDERS = [
-  { value: 'anthropic', label: 'Anthropic (API Key)' },
-  { value: 'anthropic-oauth', label: 'Anthropic (OAuth Token)', type: 'oauth', provider: 'anthropic' },
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'google', label: 'Google' },
-  { value: 'openai-codex', label: 'OpenAI Codex' },
-  { value: 'minimax', label: 'MiniMax' },
-  { value: 'amazon-bedrock', label: 'Amazon Bedrock' },
-  { value: 'azure-openai-responses', label: 'Azure OpenAI' },
-  { value: 'cerebras', label: 'Cerebras' },
-  { value: 'github-copilot', label: 'GitHub Copilot' },
-  { value: 'google-vertex', label: 'Google Vertex' },
-  { value: 'groq', label: 'Groq' },
-  { value: 'huggingface', label: 'Hugging Face' },
-  { value: 'kimi-coding', label: 'Kimi Coding' },
-  { value: 'mistral', label: 'Mistral' },
-  { value: 'openrouter', label: 'OpenRouter' },
-  { value: 'xai', label: 'xAI' },
-]
+// ---------------------------------------------------------------------------
+// Add Credential Wizard
+// ---------------------------------------------------------------------------
 
-const PROVIDER_COLORS = {
-  anthropic: 'text-orange-600 dark:text-orange-400 bg-orange-100 dark:bg-orange-900/30',
-  openai: 'text-green-600 dark:text-green-400 bg-green-100 dark:bg-green-900/30',
-  google: 'text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/30',
-  minimax: 'text-purple-600 dark:text-purple-400 bg-purple-100 dark:bg-purple-900/30',
-  'openai-codex': 'text-emerald-600 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-900/30',
+function AddCredentialWizard({ onComplete, onCancel, authFetch }) {
+  const [step, setStep] = useState('provider') // provider → method → action → label
+  const [selectedProvider, setSelectedProvider] = useState(null)
+  const [selectedMethod, setSelectedMethod] = useState(null) // 'api_key' | 'oauth'
+  const [token, setToken] = useState('')
+  const [label, setLabel] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  // OAuth flow state
+  const [oauthState, setOauthState] = useState('idle') // idle → starting → waiting → paste → success → error
+  const [authUrl, setAuthUrl] = useState(null)
+  const [flowId, setFlowId] = useState(null)
+  const [pasteUrl, setPasteUrl] = useState('')
+
+  const providerDef = PROVIDERS.find(p => p.id === selectedProvider)
+
+  // Step 1: Select provider
+  if (step === 'provider') {
+    return (
+      <div className="border border-blue-200 dark:border-blue-800 rounded-lg p-3 bg-blue-50/50 dark:bg-blue-950/20">
+        <div className="flex items-center justify-between mb-3">
+          <h4 className="text-xs font-semibold text-neutral-600 dark:text-neutral-300 uppercase">Step 1: Select Provider</h4>
+          <button onClick={onCancel} className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300"><X className="w-4 h-4" /></button>
+        </div>
+        <ProviderSelector onSelect={(p) => {
+          setSelectedProvider(p.id)
+          if (p.methods.length === 1) {
+            setSelectedMethod(p.methods[0])
+            setStep('action')
+          } else {
+            setStep('method')
+          }
+        }} />
+      </div>
+    )
+  }
+
+  // Step 2: Select method (only if provider supports multiple)
+  if (step === 'method') {
+    return (
+      <div className="border border-blue-200 dark:border-blue-800 rounded-lg p-3 bg-blue-50/50 dark:bg-blue-950/20">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <button onClick={() => setStep('provider')} className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300"><ArrowLeft className="w-4 h-4" /></button>
+            <h4 className="text-xs font-semibold text-neutral-600 dark:text-neutral-300 uppercase">Step 2: {providerDef?.label} — Choose Method</h4>
+          </div>
+          <button onClick={onCancel} className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300"><X className="w-4 h-4" /></button>
+        </div>
+        <div className="space-y-2">
+          {providerDef?.methods.includes('api_key') && (
+            <button
+              onClick={() => { setSelectedMethod('api_key'); setStep('action') }}
+              className="w-full text-left px-4 py-3 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:border-blue-300 dark:hover:border-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950/30 transition-colors"
+            >
+              <div className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Paste API Key</div>
+              <div className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">Enter an API key from your provider dashboard</div>
+            </button>
+          )}
+          {providerDef?.methods.includes('setup_token') && (
+            <button
+              onClick={() => { setSelectedMethod('setup_token'); setStep('action') }}
+              className="w-full text-left px-4 py-3 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:border-blue-300 dark:hover:border-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950/30 transition-colors"
+            >
+              <div className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Paste Setup Token</div>
+              <div className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">Run <code className="bg-neutral-100 dark:bg-neutral-700 px-1 rounded">claude setup-token</code> in your terminal to get an OAuth token</div>
+            </button>
+          )}
+          {providerDef?.methods.includes('oauth') && (
+            <button
+              onClick={() => { setSelectedMethod('oauth'); setStep('action') }}
+              className="w-full text-left px-4 py-3 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:border-blue-300 dark:hover:border-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950/30 transition-colors"
+            >
+              <div className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Browser Sign-In (OAuth)</div>
+              <div className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">Sign in with your account — works remotely via redirect URL paste</div>
+            </button>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  // Step 3: Action (paste key, setup token, or OAuth flow)
+  if (step === 'action') {
+    // Setup token (e.g., `claude setup-token`)
+    if (selectedMethod === 'setup_token') {
+      return (
+        <div className="border border-blue-200 dark:border-blue-800 rounded-lg p-3 bg-blue-50/50 dark:bg-blue-950/20">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <button onClick={() => setStep('method')} className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300"><ArrowLeft className="w-4 h-4" /></button>
+              <h4 className="text-xs font-semibold text-neutral-600 dark:text-neutral-300 uppercase">Step 3: {providerDef?.label} — Setup Token</h4>
+            </div>
+            <button onClick={onCancel} className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300"><X className="w-4 h-4" /></button>
+          </div>
+          <div className="p-2 mb-3 rounded-lg bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-xs text-neutral-600 dark:text-neutral-400 space-y-1">
+            <p>1. Open a terminal on the machine where Claude Code is installed</p>
+            <p>2. Run: <code className="bg-white dark:bg-neutral-700 px-1.5 py-0.5 rounded font-mono">claude setup-token</code></p>
+            <p>3. Follow the prompts to authenticate with your Claude Pro/Max account</p>
+            <p>4. Copy the generated token (starts with <code className="bg-white dark:bg-neutral-700 px-1 rounded">sk-ant-oat-</code>) and paste it below</p>
+          </div>
+          <input
+            type="password"
+            placeholder="Paste your setup token (sk-ant-oat-...)..."
+            value={token}
+            onChange={e => setToken(e.target.value)}
+            autoFocus
+            className="w-full px-3 py-2 text-sm border rounded-lg bg-white dark:bg-neutral-800 border-neutral-300 dark:border-neutral-600 text-neutral-800 dark:text-neutral-200 mb-2"
+          />
+          <button
+            onClick={() => { if (token) setStep('label') }}
+            disabled={!token}
+            className="w-full px-3 py-1.5 text-sm font-medium bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 flex items-center justify-center gap-1"
+          >
+            Next <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )
+    }
+
+    // API key paste
+    if (selectedMethod === 'api_key') {
+      return (
+        <div className="border border-blue-200 dark:border-blue-800 rounded-lg p-3 bg-blue-50/50 dark:bg-blue-950/20">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <button onClick={() => providerDef?.methods.length > 1 ? setStep('method') : setStep('provider')} className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300"><ArrowLeft className="w-4 h-4" /></button>
+              <h4 className="text-xs font-semibold text-neutral-600 dark:text-neutral-300 uppercase">Step 3: {providerDef?.label} — Paste API Key</h4>
+            </div>
+            <button onClick={onCancel} className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300"><X className="w-4 h-4" /></button>
+          </div>
+          <input
+            type="password"
+            placeholder="Paste your API key..."
+            value={token}
+            onChange={e => setToken(e.target.value)}
+            autoFocus
+            className="w-full px-3 py-2 text-sm border rounded-lg bg-white dark:bg-neutral-800 border-neutral-300 dark:border-neutral-600 text-neutral-800 dark:text-neutral-200 mb-2"
+          />
+          <button
+            onClick={() => { if (token) setStep('label') }}
+            disabled={!token}
+            className="w-full px-3 py-1.5 text-sm font-medium bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 flex items-center justify-center gap-1"
+          >
+            Next <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )
+    }
+
+    // OAuth flow
+    if (selectedMethod === 'oauth') {
+      const startOAuth = async () => {
+        setOauthState('starting')
+        try {
+          // Open blank window synchronously for popup blocker avoidance
+          const authWindow = window.open('about:blank', '_blank')
+          const res = await authFetch('/api/oauth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ provider: providerDef?.oauthProviderId || selectedProvider })
+          })
+          if (!res.ok) throw new Error('Failed to start login')
+          const data = await res.json()
+          setFlowId(data.flowId)
+          setAuthUrl(data.authorization_url)
+          setOauthState('waiting')
+
+          if (authWindow && data.authorization_url) {
+            authWindow.location.href = data.authorization_url
+          } else if (authWindow) {
+            authWindow.close()
+          }
+
+          // Poll for completion
+          const pollInterval = setInterval(async () => {
+            try {
+              const statusRes = await fetch(`/api/oauth/status?provider=${providerDef?.oauthProviderId || selectedProvider}`)
+              const status = await statusRes.json()
+              if (status.authenticated) {
+                clearInterval(pollInterval)
+                setOauthState('success')
+              }
+            } catch {}
+          }, 3000)
+          setTimeout(() => {
+            clearInterval(pollInterval)
+            setOauthState(prev => prev === 'success' ? prev : prev === 'waiting' ? 'paste' : prev)
+          }, 30000) // After 30s, suggest paste
+        } catch {
+          setOauthState('error')
+        }
+      }
+
+      const submitPasteUrl = async () => {
+        if (!pasteUrl || !flowId) return
+        setSaving(true)
+        try {
+          const res = await authFetch('/api/oauth/submit-code', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ flowId, code: pasteUrl })
+          })
+          const data = await res.json()
+          if (data.success) {
+            setOauthState('success')
+          } else {
+            setOauthState('error')
+          }
+        } catch {
+          setOauthState('error')
+        }
+        setSaving(false)
+      }
+
+      // If OAuth completed, go to label step
+      if (oauthState === 'success') {
+        // Small delay then move to label
+        if (step === 'action') {
+          setTimeout(() => setStep('label'), 500)
+        }
+      }
+
+      return (
+        <div className="border border-blue-200 dark:border-blue-800 rounded-lg p-3 bg-blue-50/50 dark:bg-blue-950/20">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <button onClick={() => {
+                setOauthState('idle')
+                providerDef?.methods.length > 1 ? setStep('method') : setStep('provider')
+              }} className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300"><ArrowLeft className="w-4 h-4" /></button>
+              <h4 className="text-xs font-semibold text-neutral-600 dark:text-neutral-300 uppercase">Step 3: {providerDef?.label} — OAuth Sign-In</h4>
+            </div>
+            <button onClick={onCancel} className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300"><X className="w-4 h-4" /></button>
+          </div>
+
+          {oauthState === 'idle' && (
+            <button
+              onClick={startOAuth}
+              className="w-full px-3 py-2 text-sm font-medium bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+            >
+              Open Sign-In Page
+            </button>
+          )}
+
+          {oauthState === 'starting' && (
+            <p className="text-sm text-blue-500 animate-pulse">Starting sign-in...</p>
+          )}
+
+          {(oauthState === 'waiting' || oauthState === 'paste') && (
+            <div className="space-y-3">
+              <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800">
+                <p className="text-xs text-blue-700 dark:text-blue-300 mb-1">
+                  A browser tab should have opened. Complete sign-in there.
+                </p>
+                {authUrl && (
+                  <p className="text-xs text-blue-500 dark:text-blue-400">
+                    If no window opened,{' '}
+                    <a href={authUrl} target="_blank" rel="noopener noreferrer" className="underline">click here</a>.
+                  </p>
+                )}
+              </div>
+
+              <div className="border-t border-neutral-200 dark:border-neutral-700 pt-3">
+                <p className="text-xs text-neutral-500 dark:text-neutral-400 mb-2">
+                  <strong>Remote access?</strong> After signing in, copy the URL from the browser address bar (it will start with <code className="bg-neutral-100 dark:bg-neutral-700 px-1 rounded">http://localhost</code> and may show an error — that's OK) and paste it below:
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="Paste redirect URL here..."
+                    value={pasteUrl}
+                    onChange={e => setPasteUrl(e.target.value)}
+                    className="flex-1 min-w-0 px-3 py-1.5 text-sm border rounded-lg bg-white dark:bg-neutral-800 border-neutral-300 dark:border-neutral-600 text-neutral-800 dark:text-neutral-200"
+                  />
+                  <button
+                    onClick={submitPasteUrl}
+                    disabled={!pasteUrl || saving}
+                    className="px-3 py-1.5 text-sm font-medium bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 whitespace-nowrap"
+                  >
+                    {saving ? 'Verifying...' : 'Submit'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {oauthState === 'success' && (
+            <div className="p-2 rounded-lg bg-green-100 dark:bg-green-900/30 border border-green-200 dark:border-green-800">
+              <p className="text-sm text-green-700 dark:text-green-300">Sign-in successful! Setting up credential...</p>
+            </div>
+          )}
+
+          {oauthState === 'error' && (
+            <div className="space-y-2">
+              <div className="p-2 rounded-lg bg-red-100 dark:bg-red-900/30 border border-red-200 dark:border-red-800">
+                <p className="text-xs text-red-700 dark:text-red-300">Sign-in failed. Please try again.</p>
+              </div>
+              <button
+                onClick={() => { setOauthState('idle'); setPasteUrl('') }}
+                className="w-full px-3 py-1.5 text-sm font-medium bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+        </div>
+      )
+    }
+  }
+
+  // Step 4: Label + save
+  if (step === 'label') {
+    const handleSave = async () => {
+      setSaving(true)
+      try {
+        if (selectedMethod === 'api_key' || selectedMethod === 'setup_token') {
+          const res = await authFetch('/api/keys', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              token,
+              provider: selectedProvider,
+              type: selectedMethod === 'setup_token' ? 'oauth' : 'api_key',
+              label: label || providerDef?.label || selectedProvider,
+            })
+          })
+          if (res.ok) {
+            onComplete()
+            return
+          }
+        } else if (selectedMethod === 'oauth') {
+          // OAuth credentials were already saved by the server during the flow.
+          // We need to add a key pool entry pointing to the OAuth credentials.
+          const res = await authFetch('/api/keys', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              provider: providerDef?.oauthProviderId || selectedProvider,
+              type: 'oauth',
+              authFile: `oauth-${providerDef?.oauthProviderId || selectedProvider}.json`,
+              label: label || `${providerDef?.label || selectedProvider} (OAuth)`,
+            })
+          })
+          if (res.ok) {
+            onComplete()
+            return
+          }
+        }
+      } catch {}
+      setSaving(false)
+    }
+
+    return (
+      <div className="border border-blue-200 dark:border-blue-800 rounded-lg p-3 bg-blue-50/50 dark:bg-blue-950/20">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <button onClick={() => setStep('action')} className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300"><ArrowLeft className="w-4 h-4" /></button>
+            <h4 className="text-xs font-semibold text-neutral-600 dark:text-neutral-300 uppercase">Step 4: Name This Credential</h4>
+          </div>
+          <button onClick={onCancel} className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300"><X className="w-4 h-4" /></button>
+        </div>
+        <div className="flex items-center gap-2 mb-3 text-xs text-neutral-500 dark:text-neutral-400">
+          <ProviderBadge provider={selectedProvider} />
+          <span className={`font-medium px-1.5 py-0.5 rounded ${
+            selectedMethod === 'oauth'
+              ? 'text-sky-600 dark:text-sky-400 bg-sky-100 dark:bg-sky-900/30'
+              : 'text-neutral-500 dark:text-neutral-400 bg-neutral-100 dark:bg-neutral-800'
+          }`}>
+            {selectedMethod === 'oauth' ? 'OAuth' : 'API Key'}
+          </span>
+        </div>
+        <input
+          type="text"
+          placeholder={`Label (e.g., "${providerDef?.label} — Personal")`}
+          value={label}
+          onChange={e => setLabel(e.target.value)}
+          autoFocus
+          className="w-full px-3 py-2 text-sm border rounded-lg bg-white dark:bg-neutral-800 border-neutral-300 dark:border-neutral-600 text-neutral-800 dark:text-neutral-200 mb-2"
+        />
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="w-full px-3 py-1.5 text-sm font-medium bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 flex items-center justify-center gap-1"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          {saving ? 'Saving...' : 'Add Credential'}
+        </button>
+      </div>
+    )
+  }
+
+  return null
 }
 
-function ProviderBadge({ provider }) {
-  const label = provider === 'openai-codex' ? 'Codex' : (provider || 'Unknown')
-  return (
-    <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${PROVIDER_COLORS[provider] || 'text-neutral-500 bg-neutral-100 dark:bg-neutral-800'}`}>
-      {label.charAt(0).toUpperCase() + label.slice(1)}
-    </span>
-  )
-}
+// ---------------------------------------------------------------------------
+// Main Settings Panel
+// ---------------------------------------------------------------------------
 
 export default function SettingsPanel({
   settingsOpen,
@@ -55,11 +421,7 @@ export default function SettingsPanel({
   const { showToast } = useToast()
 
   const [keys, setKeys] = useState([])
-  const [newToken, setNewToken] = useState('')
-  const [newLabel, setNewLabel] = useState('')
-  const [newProvider, setNewProvider] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [codexLoginState, setCodexLoginState] = useState(null)
+  const [showWizard, setShowWizard] = useState(false)
   const [editingLabel, setEditingLabel] = useState(null)
   const [editLabelValue, setEditLabelValue] = useState('')
 
@@ -69,41 +431,7 @@ export default function SettingsPanel({
     }).catch(() => {})
   }
 
-  useEffect(() => {
-    fetchKeys()
-    fetch('/api/openai-codex/status').then(r => r.json()).then(d => {
-      if (d.authenticated) setCodexLoginState('success')
-    }).catch(() => {})
-  }, [])
-
-  const handleAddKey = async () => {
-    if (!newToken || !newProvider) return
-    setSaving(true)
-    try {
-      const providerDef = PROVIDERS.find(p => p.value === newProvider)
-      const actualProvider = providerDef?.provider || newProvider
-      const keyType = providerDef?.type || 'api_key'
-      const res = await authFetch('/api/keys', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          token: newToken,
-          provider: actualProvider,
-          type: keyType,
-          label: newLabel || providerDef?.label || newProvider,
-        })
-      })
-      if (res.ok) {
-        const d = await res.json()
-        setKeys(d.keys || [])
-        setNewToken('')
-        setNewLabel('')
-        setNewProvider('')
-        showToast(`${providerDef?.label || newProvider} key added`)
-      }
-    } catch {}
-    setSaving(false)
-  }
+  useEffect(() => { fetchKeys() }, [])
 
   const handleRemoveKey = async (id) => {
     try {
@@ -111,7 +439,7 @@ export default function SettingsPanel({
       if (res.ok) {
         const d = await res.json()
         setKeys(d.keys || [])
-        showToast('Key removed')
+        showToast('Credential removed')
       }
     } catch {}
   }
@@ -252,57 +580,33 @@ export default function SettingsPanel({
             </button>
           </div>
           <p className="text-xs text-neutral-400 dark:text-neutral-500 mb-3">
-            Add API keys or OAuth tokens. Keys are tried in order during agent runs.
+            Keys are tried in order during agent runs. Supports API keys and OAuth sign-in.
           </p>
 
-          {/* Add credential form */}
-          <div className="space-y-2 mb-4">
-            <input
-              type="password"
-              placeholder="Paste API key or OAuth token..."
-              value={newToken}
-              onChange={e => {
-                setNewToken(e.target.value)
-                if (!newProvider) {
-                  const v = e.target.value
-                  if (v.startsWith('sk-ant-oat')) setNewProvider('anthropic-oauth')
-                  else if (v.startsWith('sk-ant-')) setNewProvider('anthropic')
-                  else if (v.startsWith('sk-proj-') || v.startsWith('sk-')) setNewProvider('openai')
-                  else if (v.startsWith('AIzaSy')) setNewProvider('google')
-                }
-              }}
-              className="w-full px-3 py-1.5 text-sm border rounded-lg bg-white dark:bg-neutral-800 border-neutral-300 dark:border-neutral-600 text-neutral-800 dark:text-neutral-200"
-            />
-            <div className="flex items-center gap-2">
-              <select
-                value={newProvider}
-                onChange={e => setNewProvider(e.target.value)}
-                className="flex-1 min-w-0 px-3 py-1.5 text-sm border rounded-lg bg-white dark:bg-neutral-800 border-neutral-300 dark:border-neutral-600 text-neutral-800 dark:text-neutral-200"
-              >
-                <option value="">Select provider...</option>
-                {PROVIDERS.map(p => (
-                  <option key={p.value} value={p.value}>{p.label}</option>
-                ))}
-              </select>
-              <input
-                type="text"
-                placeholder="Label (optional)"
-                value={newLabel}
-                onChange={e => setNewLabel(e.target.value)}
-                className="flex-1 min-w-0 px-3 py-1.5 text-sm border rounded-lg bg-white dark:bg-neutral-800 border-neutral-300 dark:border-neutral-600 text-neutral-800 dark:text-neutral-200"
+          {/* Add credential button / wizard */}
+          {showWizard ? (
+            <div className="mb-4">
+              <AddCredentialWizard
+                authFetch={authFetch}
+                onComplete={() => {
+                  setShowWizard(false)
+                  fetchKeys()
+                  showToast('Credential added')
+                }}
+                onCancel={() => setShowWizard(false)}
               />
             </div>
+          ) : (
             <button
-              onClick={handleAddKey}
-              disabled={saving || !newToken || !newProvider}
-              className="w-full px-3 py-1.5 text-sm font-medium bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 flex items-center justify-center gap-1"
+              onClick={() => setShowWizard(true)}
+              className="w-full mb-4 px-3 py-2 text-sm font-medium border-2 border-dashed border-neutral-300 dark:border-neutral-600 rounded-lg text-neutral-500 dark:text-neutral-400 hover:border-blue-400 dark:hover:border-blue-600 hover:text-blue-500 dark:hover:text-blue-400 transition-colors flex items-center justify-center gap-1"
             >
-              <Plus className="w-3.5 h-3.5" />
-              {saving ? 'Adding...' : 'Add'}
+              <Plus className="w-4 h-4" />
+              Add Credential
             </button>
-          </div>
+          )}
 
-          {/* Credential list — all keys (API + OAuth tokens) */}
+          {/* Credential list */}
           <div className="space-y-1">
             {keys.map((key, idx) => (
               <div
@@ -365,80 +669,7 @@ export default function SettingsPanel({
               </div>
             ))}
             {keys.length === 0 && (
-              <p className="text-xs text-neutral-400 dark:text-neutral-500 py-2">No credentials configured. Add one above.</p>
-            )}
-          </div>
-
-          {/* OpenAI Codex (ChatGPT) browser-based OAuth login */}
-          <div className="mt-4 pt-3 border-t border-neutral-100 dark:border-neutral-700/50">
-            <p className="text-xs text-neutral-400 dark:text-neutral-500 mb-2">
-              Or connect via browser sign-in:
-            </p>
-            <div className="flex items-center justify-between p-2 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800/50">
-              <div>
-                <span className="text-xs font-medium text-neutral-700 dark:text-neutral-300">OpenAI Codex (ChatGPT)</span>
-                <div className="flex items-center gap-1.5 mt-0.5">
-                  <ProviderBadge provider="openai-codex" />
-                  <span className={`text-xs ${codexLoginState === 'success' ? 'text-green-500' : 'text-neutral-400 dark:text-neutral-500'}`}>
-                    {codexLoginState === 'success' ? 'Connected' : 'Not connected'}
-                  </span>
-                </div>
-              </div>
-              {codexLoginState === 'success' ? (
-                <button
-                  onClick={async () => {
-                    await authFetch('/api/openai-codex/logout', { method: 'POST' })
-                    setCodexLoginState(null)
-                    showToast('ChatGPT account disconnected')
-                    fetchKeys()
-                  }}
-                  className="px-2 py-1 text-xs text-red-500 hover:text-red-700 border border-red-200 dark:border-red-800 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/30"
-                >
-                  Disconnect
-                </button>
-              ) : codexLoginState === 'waiting' ? (
-                <span className="text-xs text-blue-500 animate-pulse px-2">Waiting for sign-in...</span>
-              ) : (
-                <button
-                  onClick={async () => {
-                    try {
-                      setCodexLoginState('polling')
-                      const res = await authFetch('/api/openai-codex/login', { method: 'POST' })
-                      if (!res.ok) throw new Error('Failed')
-                      const data = await res.json()
-                      setCodexLoginState('waiting')
-                      window.open(data.authorization_url, '_blank')
-                      const pollInterval = setInterval(async () => {
-                        try {
-                          const statusRes = await fetch('/api/openai-codex/status')
-                          const status = await statusRes.json()
-                          if (status.authenticated) {
-                            clearInterval(pollInterval)
-                            setCodexLoginState('success')
-                            showToast('ChatGPT account connected')
-                            fetchKeys()
-                          }
-                        } catch {}
-                      }, 3000)
-                      setTimeout(() => {
-                        clearInterval(pollInterval)
-                        setCodexLoginState(prev => prev === 'success' ? prev : 'error')
-                      }, 300000)
-                    } catch {
-                      setCodexLoginState('error')
-                    }
-                  }}
-                  disabled={codexLoginState === 'polling'}
-                  className="px-3 py-1 text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-950/30"
-                >
-                  {codexLoginState === 'polling' ? 'Starting...' : codexLoginState === 'error' ? 'Retry' : 'Connect'}
-                </button>
-              )}
-            </div>
-            {codexLoginState === 'waiting' && (
-              <div className="mt-2 p-2 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-xs">
-                <p className="text-blue-700 dark:text-blue-300">Complete sign-in in the browser tab that just opened.</p>
-              </div>
+              <p className="text-xs text-neutral-400 dark:text-neutral-500 py-2">No credentials configured. Click "Add Credential" above to get started.</p>
             )}
           </div>
         </div>
