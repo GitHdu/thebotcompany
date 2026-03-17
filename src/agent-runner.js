@@ -478,8 +478,8 @@ export async function runAgentWithAPI(opts) {
     model: rawModel = 'claude-opus-4-6',
     token: initialToken,
     keyType = 'api',
-    provider: keyProvider = null,
-    reasoningEffort,
+    provider: initialProvider = null,
+    reasoningEffort: initialReasoningEffort,
     cwd,
     timeoutMs = 0,
     env = {},
@@ -492,10 +492,12 @@ export async function runAgentWithAPI(opts) {
   } = opts;
 
   const startTime = Date.now();
-  const { piModel } = resolveModel(rawModel);
+  let { piModel } = resolveModel(rawModel);
   let token = initialToken;
   let keyId = initialKeyId;
-  const isOAuth = keyType === 'oauth';
+  let isOAuth = keyType === 'oauth';
+  let keyProvider = initialProvider;
+  let reasoningEffort = initialReasoningEffort;
 
   // Format tools for pi-ai
   const canonicalTools = getToolDefinitions();
@@ -678,7 +680,7 @@ export async function runAgentWithAPI(opts) {
             return makeResult(false, lastResultText || (abortReason === 'timeout' ? 'Agent timed out' : 'Agent was terminated'), { timedOut: abortReason === 'timeout' });
           }
           const status = err.status || err.code || 0;
-          const isRetryable = status === 429 || status === 503 || /rate.limit|overloaded|unavailable|quota/i.test(err.message);
+          const isRetryable = status === 429 || status === 503 || /rate.limit|usage.limit|overloaded|unavailable|quota/i.test(err.message);
           if (isRetryable && attempt < MAX_RETRIES) {
             // Notify caller about rate limit so key pool can rotate
             if (onRateLimited && keyId) {
@@ -691,7 +693,17 @@ export async function runAgentWithAPI(opts) {
                 if (newKey?.token && newKey.token !== token) {
                   token = newKey.token;
                   keyId = newKey.keyId;
-                  log(`Rotated to key ${keyId} after rate limit`);
+                  isOAuth = newKey.type === 'oauth';
+                  // If the fallback key resolved a different model (provider change), update
+                  if (newKey.model) {
+                    const { piModel: newPiModel } = resolveModel(newKey.model);
+                    piModel = newPiModel;
+                    if (newKey.reasoningEffort !== undefined) reasoningEffort = newKey.reasoningEffort;
+                    keyProvider = newKey.provider;
+                    log(`Rotated to key ${keyId} (${newKey.provider}), model → ${newKey.model}`);
+                  } else {
+                    log(`Rotated to key ${keyId} after rate limit`);
+                  }
                   continue; // retry immediately with new key
                 }
               } catch {}

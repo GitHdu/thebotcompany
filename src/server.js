@@ -1791,6 +1791,12 @@ class ProjectRunner {
       onRateLimited: (kid) => markRateLimited(kid, 60_000),
       resolveNewToken: async () => {
         const newKey = await resolveKeyForProject(config, providerHint, oauthTokenGetter);
+        if (newKey?.provider && newKey.provider !== providerHint) {
+          // Provider changed — resolve model for new provider
+          const newResolved = resolveModelTier(agentTierOrModel, newKey.provider, config.models);
+          newKey.model = newResolved.model;
+          newKey.reasoningEffort = newResolved.reasoningEffort || null;
+        }
         return newKey;
       },
       log: (msg) => {
