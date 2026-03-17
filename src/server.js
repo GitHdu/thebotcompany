@@ -3025,17 +3025,19 @@ const server = http.createServer(async (req, res) => {
         };
         const poolSafe = getKeyPoolSafe();
         const firstKey = poolSafe.keys.find(k => k.enabled);
-        const providerName = config.setupTokenProvider || firstKey?.provider || 'anthropic';
+        const providerHintForSummary = config.setupTokenProvider || firstKey?.provider || 'anthropic';
 
-        const resolved = resolveModelTier('low', providerName);
-        const model = resolved.model;
-
-        keyResult = await resolveKeyForProject(config, providerName, oauthGetter);
+        keyResult = await resolveKeyForProject(config, providerHintForSummary, oauthGetter);
         const token = keyResult?.token || config.setupToken || null;
 
         if (!token) { db.close(); res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'No API token configured' })); return; }
 
-        log(`Summarize report ${reportId}: provider=${providerName}, model=${model}`, runner.id);
+        // Use the resolved key's actual provider for model resolution (not the hint)
+        const actualProvider = keyResult?.provider || providerHintForSummary;
+        const resolved = resolveModelTier('low', actualProvider);
+        const model = resolved.model;
+
+        log(`Summarize report ${reportId}: provider=${actualProvider}, model=${model}`, runner.id);
 
         // Strip meta blocks from body for cleaner summarization
         const cleanBody = report.body

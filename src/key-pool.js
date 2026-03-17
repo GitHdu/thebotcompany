@@ -201,7 +201,7 @@ export async function resolveKeyForProject(projectConfig, providerHint, getOAuth
     const selected = sorted.find(k => k.id === keySelection.keyId);
     if (selected && !isRateLimited(selected.id)) {
       const token = await resolveToken(selected, getOAuthToken);
-      if (token) return { token, provider: selected.provider, keyId: selected.id, type: selected.type || 'api' };
+      if (token) return { token, provider: selected.provider, keyId: selected.id, type: selected.type || 'api_key' };
     }
     // If fallback is disabled, return null (project waits)
     if (keySelection.fallback === false) return null;
@@ -215,14 +215,14 @@ export async function resolveKeyForProject(projectConfig, providerHint, getOAuth
     for (const key of candidates) {
       if (key.provider !== providerHint) continue;
       const token = await resolveToken(key, getOAuthToken);
-      if (token) return { token, provider: key.provider, keyId: key.id, type: key.type || 'api' };
+      if (token) return { token, provider: key.provider, keyId: key.id, type: key.type || 'api_key' };
     }
   }
 
   // Second pass: any available key (cross-provider fallback)
   for (const key of candidates) {
     const token = await resolveToken(key, getOAuthToken);
-    if (token) return { token, provider: key.provider, keyId: key.id, type: key.type || 'api' };
+    if (token) return { token, provider: key.provider, keyId: key.id, type: key.type || 'api_key' };
   }
 
   return null;
