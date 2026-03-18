@@ -72,7 +72,7 @@ const MODEL_TIERS = {
     high:  { model: 'gpt-5.3-codex', reasoningEffort: 'xhigh' },
     mid:   { model: 'gpt-5.3-codex', reasoningEffort: 'high' },
     low:   { model: 'gpt-5.3-codex', reasoningEffort: 'medium' },
-    xlow:  { model: 'gpt-5.3-codex', reasoningEffort: 'low' },
+    xlow:  { model: 'gpt-4.1-mini' },
   },
   google: {
     high:  { model: 'gemini-3.1-pro-preview', reasoningEffort: 'high' },
@@ -90,7 +90,7 @@ const MODEL_TIERS = {
     high:  { model: 'openai-codex/gpt-5.3-codex', reasoningEffort: 'xhigh' },
     mid:   { model: 'openai-codex/gpt-5.3-codex', reasoningEffort: 'high' },
     low:   { model: 'openai-codex/gpt-5.3-codex', reasoningEffort: 'medium' },
-    xlow:  { model: 'openai-codex/gpt-5.3-codex', reasoningEffort: 'low' },
+    xlow:  { model: 'openai-codex/gpt-5.3-codex-spark' },
   },
 };
 
