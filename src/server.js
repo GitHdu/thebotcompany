@@ -1810,7 +1810,8 @@ class ProjectRunner {
         const newKey = await resolveKeyForProject(config, providerHint, oauthTokenGetter);
         if (newKey?.provider && newKey.provider !== providerHint) {
           // Provider changed — resolve model for new provider
-          const newResolved = resolveModelTier(agentTierOrModel, newKey.provider, config.models);
+          // Ignore project model overrides (they're provider-specific)
+          const newResolved = resolveModelTier(agentTierOrModel, newKey.provider, null);
           newKey.model = newResolved.model;
           newKey.reasoningEffort = newResolved.reasoningEffort || null;
         }
