@@ -2824,16 +2824,24 @@ const server = http.createServer(async (req, res) => {
       }
 
       // Build available models list per provider from pi-ai
-      // For models that support reasoning, generate combined "model@effort" options
+      // Only show recent/relevant models, not the full historical catalog
       const EFFORT_LEVELS = ['medium', 'high', 'xhigh'];
+      const ALLOWED_MODELS = {
+        anthropic: /^claude-(opus|sonnet|haiku)-4-[56]/,
+        openai: /^(gpt-5\.[34]|o[34])/,
+        'openai-codex': /^(gpt-5\.[34])/,
+        google: /^gemini-[23]/,
+        minimax: /MiniMax/,
+      };
       const availableModels = {};
       for (const provider of Object.keys(MODEL_TIERS)) {
         try {
           const models = getPiModels(provider);
+          const filter = ALLOWED_MODELS[provider];
           const entries = [];
           for (const m of models) {
+            if (filter && !filter.test(m.id)) continue;
             if (m.reasoning) {
-              // Model supports reasoning — add one entry per effort level
               for (const effort of EFFORT_LEVELS) {
                 entries.push({ id: `${m.id}@${effort}`, name: `${m.name} (${effort})` });
               }
