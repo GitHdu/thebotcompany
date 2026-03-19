@@ -3528,7 +3528,7 @@ const server = http.createServer(async (req, res) => {
             'Connection': 'keep-alive',
           });
 
-          await streamChatMessage({
+          const chatOpts = {
             agentDir: runner.agentDir,
             projectPath: runner.path,
             chatId,
@@ -3538,7 +3538,36 @@ const server = http.createServer(async (req, res) => {
             provider: providerHint,
             res,
             reasoningEffort: resolved.reasoningEffort || null,
-          });
+          };
+
+          try {
+            await streamChatMessage(chatOpts);
+          } catch (chatErr) {
+            // Check if rate-limited — try fallback key
+            const isRateLimit = /rate.limit|usage.limit|quota|429/i.test(chatErr.message);
+            if (isRateLimit && keyResult.keyId) {
+              const cooldownMs = parseSummarizeCooldown(chatErr.message);
+              markRateLimited(keyResult.keyId, cooldownMs);
+              log(`Chat: marked key ${keyResult.keyId} rate-limited for ${Math.ceil(cooldownMs / 60_000)}m`, runner.id);
+
+              // Try fallback key
+              const fallbackKey = await resolveKeyForProject(config, null, oauthTokenGetter);
+              if (fallbackKey?.token && fallbackKey.token !== keyResult.token) {
+                const fbProvider = fallbackKey.provider || detectProviderFromToken(fallbackKey.token);
+                const fbResolved = resolveModelTier(config.model || 'mid', fbProvider, null);
+                log(`Chat: falling back to key ${fallbackKey.keyId} (${fbProvider}), model → ${fbResolved.model}`, runner.id);
+                chatOpts.token = fallbackKey.token;
+                chatOpts.provider = fbProvider;
+                chatOpts.model = fbResolved.model;
+                chatOpts.reasoningEffort = fbResolved.reasoningEffort || null;
+                await streamChatMessage(chatOpts);
+              } else {
+                throw chatErr; // no fallback available
+              }
+            } else {
+              throw chatErr;
+            }
+          }
 
           res.end();
         } catch (e) {
