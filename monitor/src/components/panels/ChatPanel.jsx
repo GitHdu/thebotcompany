@@ -189,6 +189,15 @@ export default function ChatPanel({ open, onClose, selectedProject, chatSession 
 
   const sendMessage = async () => {
     if (!input.trim() || streaming || !chatSession || !selectedProject) return
+    // Double-check backend isn't already processing
+    try {
+      const checkRes = await fetch(`/api/projects/${selectedProject.id}/chats/${chatSession.id}`)
+      const checkData = await checkRes.json()
+      if (checkData.streaming) {
+        setStreaming(true)
+        return // backend still processing, don't send duplicate
+      }
+    } catch {}
 
     const userMsg = input.trim()
     setInput('')
