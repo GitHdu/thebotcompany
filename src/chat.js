@@ -359,9 +359,11 @@ export async function streamChatMessage(opts) {
     // Skip tool_result messages — they're captured in the assistant text summary
   }
 
-  // Tool loop — max 10 iterations
-  const MAX_TOOL_ITERATIONS = 10;
+  // Tool loop limits — keep chat responses focused
+  const MAX_TOOL_ITERATIONS = 5;   // max LLM round-trips with tools
+  const MAX_TOTAL_TOOL_CALLS = 15; // max total tool calls across all iterations
   let iteration = 0;
+  let totalToolCalls = 0;
   let fullAssistantText = '';
   let allToolCalls = [];
 
@@ -442,6 +444,13 @@ export async function streamChatMessage(opts) {
 
       // If no tool calls, we're done
       if (toolCalls.length === 0) break;
+
+      totalToolCalls += toolCalls.length;
+      if (totalToolCalls >= MAX_TOTAL_TOOL_CALLS) {
+        sseWrite({ type: 'text', content: '\n\n*[Tool limit reached — summarizing what I found so far]*' });
+        fullAssistantText += '\n\n*[Tool limit reached — summarizing what I found so far]*';
+        break;
+      }
 
       // Execute tools
       const toolResults = [];
