@@ -123,8 +123,14 @@ export default function ChatPanel({ open, onClose, selectedProject, chatSession,
         // If backend is still streaming, show current content and reconnect
         if (data.streaming && data.streamingContent) {
           setStreaming(true)
-          setStreamingText(data.streamingContent.text || '')
-          setStreamingToolCalls(data.streamingContent.toolCalls || [])
+          // Build initial blocks from streaming content
+          const initialBlocks = []
+          const sc = data.streamingContent
+          if (sc.text) initialBlocks.push({ type: 'text', content: sc.text })
+          if (sc.toolCalls) sc.toolCalls.forEach(tc => initialBlocks.push({ type: 'tool', ...tc }))
+          setStreamingBlocks(initialBlocks)
+          setStreamingText(sc.text || '')
+          setStreamingToolCalls(sc.toolCalls || [])
 
           // Reconnect to SSE stream for remaining events
           const evtRes = await fetch(`/api/projects/${selectedProject.id}/chats/${chatSession.id}/stream`)
@@ -132,8 +138,6 @@ export default function ChatPanel({ open, onClose, selectedProject, chatSession,
           const reader = evtRes.body.getReader()
           const decoder = new TextDecoder()
           let buffer = ''
-          let accText = data.streamingContent.text || ''
-          let accToolCalls = [...(data.streamingContent.toolCalls || [])]
 
           while (true) {
             const { done, value } = await reader.read()
@@ -147,26 +151,25 @@ export default function ChatPanel({ open, onClose, selectedProject, chatSession,
                 const evt = JSON.parse(line.slice(6))
                 switch (evt.type) {
                   case 'text':
-                    accText += evt.content
-                    setStreamingText(accText)
+                    setStreamingBlocks(prev => {
+                      const last = prev[prev.length - 1]
+                      if (last?.type === 'text') return [...prev.slice(0, -1), { type: 'text', content: last.content + evt.content }]
+                      return [...prev, { type: 'text', content: evt.content }]
+                    })
                     break
                   case 'tool_call':
-                    accToolCalls.push(evt)
-                    setStreamingToolCalls([...accToolCalls])
+                    setStreamingBlocks(prev => [...prev, { type: 'tool', ...evt }])
                     break
                   case 'tool_result':
-                    accToolCalls = accToolCalls.map(tc => tc.id === evt.id ? { ...tc, output: evt.output } : tc)
-                    setStreamingToolCalls([...accToolCalls])
+                    setStreamingBlocks(prev => prev.map(b => b.type === 'tool' && b.id === evt.id ? { ...b, output: evt.output } : b))
                     break
                   case 'done':
-                    // Reload from backend to get final saved state
                     const finalRes = await fetch(`/api/projects/${selectedProject.id}/chats/${chatSession.id}`)
                     const finalData = await finalRes.json()
                     if (finalData.session?.messages) setMessages(finalData.session.messages)
                     setStreaming(false)
                     setStreamingText(''); setStreamingBlocks([])
                     setStreamingToolCalls([])
-                    // cleared
                     return
                 }
               } catch {}
@@ -184,7 +187,7 @@ export default function ChatPanel({ open, onClose, selectedProject, chatSession,
 
   // Poll for new messages (syncs across devices, picks up background completions)
   useEffect(() => {
-    if (!chatSession || !selectedProject || !open || streaming) return
+    if (!chatSession || !selectedProject || !open || chatSession._temp) return
     const poll = async () => {
       try {
         const res = await fetch(`/api/projects/${selectedProject.id}/chats/${chatSession.id}`)
@@ -193,13 +196,58 @@ export default function ChatPanel({ open, onClose, selectedProject, chatSession,
         if (data.session?.messages && data.session.messages.length !== messages.length) {
           setMessages(data.session.messages)
         }
-        // If backend started streaming (from another device), reconnect
+        // If backend started streaming (from another device), show content and reconnect
         if (data.streaming && !streaming) {
           setStreaming(true)
           if (data.streamingContent) {
+            const blocks = []
+            if (data.streamingContent.text) blocks.push({ type: 'text', content: data.streamingContent.text })
+            if (data.streamingContent.toolCalls) data.streamingContent.toolCalls.forEach(tc => blocks.push({ type: 'tool', ...tc }))
+            setStreamingBlocks(blocks)
             setStreamingText(data.streamingContent.text || '')
-            setStreamingBlocks(data.streamingContent.toolCalls?.map(tc => ({ type: 'tool', ...tc })) || [])
           }
+          // Connect to SSE stream
+          try {
+            const evtRes = await fetch(`/api/projects/${selectedProject.id}/chats/${chatSession.id}/stream`)
+            const reader = evtRes.body.getReader()
+            const decoder = new TextDecoder()
+            let buffer = ''
+            while (true) {
+              const { done, value } = await reader.read()
+              if (done) break
+              buffer += decoder.decode(value, { stream: true })
+              const lines = buffer.split('\n')
+              buffer = lines.pop()
+              for (const line of lines) {
+                if (!line.startsWith('data: ')) continue
+                try {
+                  const evt = JSON.parse(line.slice(6))
+                  if (evt.type === 'text') setStreamingBlocks(prev => {
+                    const last = prev[prev.length - 1]
+                    if (last?.type === 'text') return [...prev.slice(0, -1), { type: 'text', content: last.content + evt.content }]
+                    return [...prev, { type: 'text', content: evt.content }]
+                  })
+                  else if (evt.type === 'tool_call') setStreamingBlocks(prev => [...prev, { type: 'tool', ...evt }])
+                  else if (evt.type === 'tool_result') setStreamingBlocks(prev => prev.map(b => b.id === evt.id ? { ...b, output: evt.output } : b))
+                  else if (evt.type === 'done') {
+                    const fr = await fetch(`/api/projects/${selectedProject.id}/chats/${chatSession.id}`)
+                    const fd = await fr.json()
+                    if (fd.session?.messages) setMessages(fd.session.messages)
+                    setStreaming(false)
+                    setStreamingBlocks([])
+                    setStreamingText('')
+                    break
+                  }
+                } catch {}
+              }
+            }
+          } catch { setStreaming(false); setStreamingBlocks([]) }
+        }
+        // If backend stopped streaming, update messages
+        if (!data.streaming && streaming) {
+          setStreaming(false)
+          setStreamingBlocks([])
+          setStreamingText('')
         }
       } catch {}
     }
