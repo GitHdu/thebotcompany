@@ -178,6 +178,31 @@ export default function ChatPanel({ open, onClose, selectedProject, chatSession 
     return () => { cancelled = true }
   }, [chatSession?.id, selectedProject?.id])
 
+  // Poll for new messages (syncs across devices, picks up background completions)
+  useEffect(() => {
+    if (!chatSession || !selectedProject || !open || streaming) return
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/projects/${selectedProject.id}/chats/${chatSession.id}`)
+        if (!res.ok) return
+        const data = await res.json()
+        if (data.session?.messages && data.session.messages.length !== messages.length) {
+          setMessages(data.session.messages)
+        }
+        // If backend started streaming (from another device), reconnect
+        if (data.streaming && !streaming) {
+          setStreaming(true)
+          if (data.streamingContent) {
+            setStreamingText(data.streamingContent.text || '')
+            setStreamingBlocks(data.streamingContent.toolCalls?.map(tc => ({ type: 'tool', ...tc })) || [])
+          }
+        }
+      } catch {}
+    }
+    const interval = setInterval(poll, 3000)
+    return () => clearInterval(interval)
+  }, [chatSession?.id, selectedProject?.id, open, streaming, messages.length])
+
   // Auto-scroll — use scrollTop instead of scrollIntoView to prevent parent scroll
   const messagesContainerRef = useRef(null)
   const scrollToBottom = useCallback(() => {
