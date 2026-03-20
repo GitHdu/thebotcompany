@@ -273,6 +273,16 @@ function getChatToolDefinitions() {
 export async function streamChatMessage(opts) {
   const { agentDir, projectPath, chatId, userMessage, model, token, provider, res, reasoningEffort } = opts;
 
+  // Track client connection — continue processing even if client disconnects
+  let clientConnected = true;
+  res.on('close', () => { clientConnected = false; });
+
+  // Safe SSE write — ignore errors when client disconnects
+  const sseWrite = (obj) => {
+    if (!clientConnected) return;
+    try { res.write(`data: ${JSON.stringify(obj)}\n\n`); } catch {}
+  };
+
   // Save user message
   saveMessage(agentDir, chatId, 'user', userMessage);
   maybeUpdateTitle(agentDir, chatId, userMessage);
@@ -283,8 +293,8 @@ export async function streamChatMessage(opts) {
   // Load history
   const session = getSession(agentDir, chatId);
   if (!session) {
-    res.write(`data: ${JSON.stringify({ type: 'error', content: 'Session not found' })}\n\n`);
-    res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+    sseWrite({ type: 'error', content: 'Session not found' });
+    sseWrite({ type: 'done' });
     return;
   }
 
@@ -349,7 +359,7 @@ Be concise and helpful. When asked about code, use the tools to look things up r
         switch (event.type) {
           case 'text_delta':
             assistantText += event.delta;
-            res.write(`data: ${JSON.stringify({ type: 'text', content: event.delta })}\n\n`);
+            sseWrite({ type: 'text', content: event.delta });
             break;
 
           case 'toolcall_end':
@@ -358,12 +368,12 @@ Be concise and helpful. When asked about code, use the tools to look things up r
               name: event.toolCall.name,
               input: event.toolCall.arguments,
             });
-            res.write(`data: ${JSON.stringify({
+            sseWrite({
               type: 'tool_call',
               id: event.toolCall.id,
               name: event.toolCall.name,
               input: event.toolCall.arguments,
-            })}\n\n`);
+            });
             break;
 
           case 'done':
@@ -376,8 +386,8 @@ Be concise and helpful. When asked about code, use the tools to look things up r
             if (/rate.limit|usage.limit|quota|429/i.test(errMsg)) {
               throw new Error(errMsg);
             }
-            res.write(`data: ${JSON.stringify({ type: 'error', content: errMsg })}\n\n`);
-            res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+            sseWrite({ type: 'error', content: errMsg });
+            sseWrite({ type: 'done' });
             return;
         }
       }
@@ -414,12 +424,12 @@ Be concise and helpful. When asked about code, use the tools to look things up r
           });
           // Truncate output for SSE display
           const displayOutput = output.length > 2000 ? output.slice(0, 2000) + '\n... (truncated)' : output;
-          res.write(`data: ${JSON.stringify({
+          sseWrite({
             type: 'tool_result',
             id: tc.id,
             name: tc.name,
             output: displayOutput,
-          })}\n\n`);
+          });
         } catch (err) {
           const errOutput = `Error: ${err.message}`;
           toolResults.push({
@@ -427,12 +437,12 @@ Be concise and helpful. When asked about code, use the tools to look things up r
             toolName: tc.name,
             content: errOutput,
           });
-          res.write(`data: ${JSON.stringify({
+          sseWrite({
             type: 'tool_result',
             id: tc.id,
             name: tc.name,
             output: errOutput,
-          })}\n\n`);
+          });
         }
       }
 
@@ -452,8 +462,8 @@ Be concise and helpful. When asked about code, use the tools to look things up r
     if (/rate.limit|usage.limit|quota|429/i.test(err.message)) {
       throw err;
     }
-    res.write(`data: ${JSON.stringify({ type: 'error', content: err.message })}\n\n`);
+    sseWrite({ type: 'error', content: err.message });
   }
 
-  res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+  sseWrite({ type: 'done' });
 }
