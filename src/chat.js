@@ -305,7 +305,14 @@ export async function streamChatMessage(opts) {
   };
 
   // Save user message
-  saveMessage(agentDir, chatId, 'user', userMessage);
+  // Only save user message if it's not a duplicate of the last message
+  const db = getChatDb(agentDir);
+  try {
+    const lastMsg = db.prepare('SELECT role, content FROM chat_messages WHERE session_id = ? ORDER BY id DESC LIMIT 1').get(chatId);
+    if (!(lastMsg && lastMsg.role === 'user' && lastMsg.content === userMessage)) {
+      saveMessage(agentDir, chatId, 'user', userMessage);
+    }
+  } finally { db.close(); }
   maybeUpdateTitle(agentDir, chatId, userMessage);
 
   // Ensure worktree
