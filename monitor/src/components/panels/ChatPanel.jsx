@@ -171,9 +171,11 @@ export default function ChatPanel({ open, onClose, selectedProject, chatSession 
     return () => { cancelled = true }
   }, [chatSession?.id, selectedProject?.id])
 
-  // Auto-scroll
+  // Auto-scroll — use scrollTop instead of scrollIntoView to prevent parent scroll
+  const messagesContainerRef = useRef(null)
   const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const container = messagesContainerRef.current
+    if (container) container.scrollTop = container.scrollHeight
   }, [])
 
   useEffect(() => { scrollToBottom() }, [messages, streamingText, streamingToolCalls])
@@ -296,7 +298,7 @@ export default function ChatPanel({ open, onClose, selectedProject, chatSession 
       </PanelHeader>
       <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
         {/* Messages area */}
-        <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-1">
+        <div ref={messagesContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-1 overscroll-contain">
           {messages.length === 0 && !streaming && (
             <div className="text-center text-neutral-400 dark:text-neutral-500 text-sm py-12">
               Ask anything about the project...
