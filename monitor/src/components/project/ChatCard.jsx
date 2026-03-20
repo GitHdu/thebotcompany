@@ -23,20 +23,11 @@ export default function ChatCard({ selectedProject, onOpenChat, onNewChat }) {
 
   useEffect(() => { fetchSessions() }, [selectedProject?.id])
 
-  const handleNew = async () => {
+  const handleNew = () => {
     if (!selectedProject) return
-    try {
-      const res = await authFetch(`/api/projects/${selectedProject.id}/chats`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      })
-      if (res.ok) {
-        const data = await res.json()
-        fetchSessions()
-        if (onNewChat) onNewChat(data.session)
-      }
-    } catch {}
+    // Create a temporary unsaved session — only persists to DB on first message
+    const tempSession = { id: null, title: 'New Chat', _temp: true }
+    if (onNewChat) onNewChat(tempSession)
   }
 
   const handleDelete = async (e, chatId) => {

@@ -859,6 +859,7 @@ export default function ProjectView({
         onClose={() => setChatPanelOpen(false)}
         selectedProject={selectedProject}
         chatSession={chatSession}
+        onSessionCreated={(session) => setChatSession(session)}
       />
       <ReportsPanel
         open={reportsPanelOpen}

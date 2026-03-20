@@ -85,7 +85,7 @@ function MessageBubble({ msg }) {
   )
 }
 
-export default function ChatPanel({ open, onClose, selectedProject, chatSession }) {
+export default function ChatPanel({ open, onClose, selectedProject, chatSession, onSessionCreated }) {
   const { authFetch } = useAuth()
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
@@ -100,6 +100,10 @@ export default function ChatPanel({ open, onClose, selectedProject, chatSession 
   // Load messages when session changes
   useEffect(() => {
     if (!chatSession || !selectedProject) {
+      setMessages([])
+      return
+    }
+    if (chatSession._temp) {
       setMessages([])
       return
     }
@@ -221,26 +225,43 @@ export default function ChatPanel({ open, onClose, selectedProject, chatSession 
 
   const sendMessage = async () => {
     if (!input.trim() || streaming || !chatSession || !selectedProject) return
-    // Double-check backend isn't already processing
-    try {
-      const checkRes = await fetch(`/api/projects/${selectedProject.id}/chats/${chatSession.id}`)
-      const checkData = await checkRes.json()
-      if (checkData.streaming) {
-        setStreaming(true)
-        return // backend still processing, don't send duplicate
-      }
-    } catch {}
+
+    let activeSession = chatSession
+
+    // If temp session, create it in DB first
+    if (chatSession._temp) {
+      try {
+        const res = await authFetch(`/api/projects/${selectedProject.id}/chats`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        })
+        if (!res.ok) return
+        const data = await res.json()
+        activeSession = data.session
+        if (onSessionCreated) onSessionCreated(activeSession)
+      } catch { return }
+    } else {
+      // Double-check backend isn't already processing
+      try {
+        const checkRes = await fetch(`/api/projects/${selectedProject.id}/chats/${activeSession.id}`)
+        const checkData = await checkRes.json()
+        if (checkData.streaming) {
+          setStreaming(true)
+          return
+        }
+      } catch {}
+    }
 
     const userMsg = input.trim()
     setInput('')
-    // cleared
     setMessages(prev => [...prev, { role: 'user', content: userMsg }])
     setStreaming(true)
     setStreamingText(''); setStreamingBlocks([])
     setStreamingToolCalls([])
 
     try {
-      const response = await authFetch(`/api/projects/${selectedProject.id}/chats/${chatSession.id}/message`, {
+      const response = await authFetch(`/api/projects/${selectedProject.id}/chats/${activeSession.id}/message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: userMsg }),
