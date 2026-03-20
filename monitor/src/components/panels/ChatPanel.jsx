@@ -93,7 +93,7 @@ export default function ChatPanel({ open, onClose, selectedProject, chatSession 
   const [streamingText, setStreamingText] = useState('')
   const [streamingToolCalls, setStreamingToolCalls] = useState([])
   const [streamingBlocks, setStreamingBlocks] = useState([]) // ordered: {type:'text',content} | {type:'tool',...}
-  const [lastFailedMessage, setLastFailedMessage] = useState(null)
+  const [reconnecting, setReconnecting] = useState(false)
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
 
@@ -113,7 +113,7 @@ export default function ChatPanel({ open, onClose, selectedProject, chatSession 
 
         // If backend is NOT streaming, the response completed — clear retry banner
         if (!data.streaming) {
-          setLastFailedMessage(null)
+          // cleared
         }
 
         // If backend is still streaming, show current content and reconnect
@@ -162,7 +162,7 @@ export default function ChatPanel({ open, onClose, selectedProject, chatSession 
                     setStreaming(false)
                     setStreamingText(''); setStreamingBlocks([])
                     setStreamingToolCalls([])
-                    setLastFailedMessage(null)
+                    // cleared
                     return
                 }
               } catch {}
@@ -208,7 +208,7 @@ export default function ChatPanel({ open, onClose, selectedProject, chatSession 
 
     const userMsg = input.trim()
     setInput('')
-    setLastFailedMessage(null)
+    // cleared
     setMessages(prev => [...prev, { role: 'user', content: userMsg }])
     setStreaming(true)
     setStreamingText(''); setStreamingBlocks([])
@@ -285,26 +285,62 @@ export default function ChatPanel({ open, onClose, selectedProject, chatSession 
                     tool_calls: accToolCalls.length > 0 ? accToolCalls : null,
                   }])
                 }
-                setLastFailedMessage(null)
+                // cleared
                 break
             }
           } catch {}
         }
       }
     } catch (err) {
-      // On network error, reload conversation from backend (it has saved state)
+      // Connection lost — backend continues processing in background.
+      // Reload saved state and check if still streaming to reconnect.
+      setReconnecting(true)
       try {
         const res = await fetch(`/api/projects/${selectedProject.id}/chats/${chatSession.id}`)
         if (res.ok) {
           const data = await res.json()
-          setMessages(data.session?.messages?.map(m => ({
-            role: m.role,
-            content: m.content,
-            tool_calls: m.tool_calls ? JSON.parse(m.tool_calls) : null,
-          })).filter(m => m.role === 'user' || m.role === 'assistant') || [])
+          if (data.session?.messages) setMessages(data.session.messages)
+          if (data.streaming && data.streamingContent) {
+            // Still streaming — show current content and reconnect
+            setStreamingText(data.streamingContent.text || '')
+            setStreamingBlocks(data.streamingContent.toolCalls?.map(tc => ({ type: 'tool', ...tc })) || [])
+            // Reconnect SSE
+            try {
+              const evtRes = await fetch(`/api/projects/${selectedProject.id}/chats/${chatSession.id}/stream`)
+              const reader = evtRes.body.getReader()
+              const decoder = new TextDecoder()
+              let buffer = ''
+              while (true) {
+                const { done, value } = await reader.read()
+                if (done) break
+                buffer += decoder.decode(value, { stream: true })
+                const lines = buffer.split('\n')
+                buffer = lines.pop()
+                for (const line of lines) {
+                  if (!line.startsWith('data: ')) continue
+                  try {
+                    const evt = JSON.parse(line.slice(6))
+                    if (evt.type === 'text') setStreamingBlocks(prev => {
+                      const last = prev[prev.length - 1]
+                      if (last?.type === 'text') return [...prev.slice(0, -1), { type: 'text', content: last.content + evt.content }]
+                      return [...prev, { type: 'text', content: evt.content }]
+                    })
+                    else if (evt.type === 'tool_call') setStreamingBlocks(prev => [...prev, { type: 'tool', ...evt }])
+                    else if (evt.type === 'tool_result') setStreamingBlocks(prev => prev.map(b => b.id === evt.id ? { ...b, output: evt.output } : b))
+                    else if (evt.type === 'done') {
+                      const finalRes2 = await fetch(`/api/projects/${selectedProject.id}/chats/${chatSession.id}`)
+                      const finalData2 = await finalRes2.json()
+                      if (finalData2.session?.messages) setMessages(finalData2.session.messages)
+                      break
+                    }
+                  } catch {}
+                }
+              }
+            } catch {}
+          }
         }
       } catch {}
-      setLastFailedMessage(userMsg)
+      setReconnecting(false)
     } finally {
       setStreaming(false)
       setStreamingText(''); setStreamingBlocks([])
@@ -364,16 +400,11 @@ export default function ChatPanel({ open, onClose, selectedProject, chatSession 
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Retry banner */}
-        {lastFailedMessage && (
-          <div className="border-t border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-950 px-3 py-2 flex items-center justify-between">
-            <span className="text-xs text-orange-600 dark:text-orange-400">⚠️ Connection lost</span>
-            <button
-              onClick={() => { setInput(lastFailedMessage); setLastFailedMessage(null) }}
-              className="px-2 py-1 text-xs font-medium bg-orange-500 hover:bg-orange-600 text-white rounded"
-            >
-              Retry
-            </button>
+        {/* Reconnecting indicator */}
+        {reconnecting && (
+          <div className="border-t border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950 px-3 py-2 flex items-center gap-2">
+            <Loader2 className="w-3 h-3 animate-spin text-blue-500" />
+            <span className="text-xs text-blue-600 dark:text-blue-400">Reconnecting...</span>
           </div>
         )}
 
