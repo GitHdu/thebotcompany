@@ -359,8 +359,8 @@ export async function streamChatMessage(opts) {
     // Skip tool_result messages — they're captured in the assistant text summary
   }
 
-  // Tool loop — no artificial limit, runs until model stops calling tools
-  const MAX_TOOL_ITERATIONS = 50;
+  // Tool loop — generous limit, but prevents runaway loops
+  const MAX_TOOL_ITERATIONS = 20;
   let iteration = 0;
   let fullAssistantText = '';
   let allToolCalls = [];
@@ -499,6 +499,14 @@ export async function streamChatMessage(opts) {
 
       // Save tool result messages
       saveMessage(agentDir, chatId, 'tool_result', JSON.stringify(toolResults));
+    }
+
+    // Check if we hit the iteration limit
+    if (iteration >= MAX_TOOL_ITERATIONS) {
+      console.warn(`[Chat] Session ${chatId}: hit max iterations (${MAX_TOOL_ITERATIONS}), stopping tool loop`);
+      const limitMsg = '\n\n*I\'ve done extensive analysis. Let me summarize what I found so far based on the work above.*';
+      fullAssistantText += limitMsg;
+      sseWrite({ type: 'text', content: limitMsg });
     }
 
     // Save final assistant message
