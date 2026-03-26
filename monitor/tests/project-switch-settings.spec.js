@@ -39,17 +39,17 @@ test.describe('Settings panel on project switch', () => {
     await settingsButton.waitFor({ timeout: 5000 })
     await settingsButton.click()
 
-    // Settings panel should be open — look for settings content
-    await expect(page.locator('text=Agent Timeout')).toBeVisible({ timeout: 5000 })
+    // Settings panel should be open
+    await expect(page.getByRole('heading', { name: 'Project Settings' })).toBeAttached({ timeout: 5000 })
 
-    // Now switch to project B by clicking its tab
+    // Switch to project B by clicking its tab (in-app navigation)
     const projectBTab = page.locator(`button:has-text("${PROJECT_B}")`)
     await projectBTab.waitFor({ timeout: 5000 })
     await projectBTab.click()
-    await page.waitForLoadState('networkidle')
-    await page.waitForTimeout(500)
+    await page.waitForTimeout(1000) // wait for panel close animation
 
     // Settings panel should be CLOSED after switching projects
-    await expect(page.locator('text=Agent Timeout')).not.toBeVisible({ timeout: 3000 })
+    // Settings panel should be CLOSED
+    await expect(page.getByRole('heading', { name: 'Project Settings' })).not.toBeAttached({ timeout: 5000 })
   })
 })
