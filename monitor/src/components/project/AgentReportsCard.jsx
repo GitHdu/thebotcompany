@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { MessageSquare } from 'lucide-react'
+import { MessageSquare, CheckCircle, XCircle, Clock, Timer } from 'lucide-react'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -41,6 +41,83 @@ function ReportSummary({ reportId, projectId, summary: initialSummary, className
     <span className={className || "text-xs text-neutral-500 dark:text-neutral-400 italic"}>
       {loading ? '…' : summary}
     </span>
+  )
+}
+
+function formatDuration(ms) {
+  if (!ms) return null
+  if (ms < 60000) return `${Math.floor(ms / 1000)}s`
+  return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`
+}
+
+function formatTokens(n) {
+  if (!n) return null
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`
+  return `${n}`
+}
+
+function ReportCardHeader({ report }) {
+  const agent = report.agent || report.author
+  const hasMeta = report.cost != null || report.duration_ms != null || report.model != null
+  const timing = !hasMeta ? parseTimingBlock(report.body) : null
+
+  return (
+    <div className="mb-0.5">
+      {/* Row 1: Agent name + status + time */}
+      <div className="flex items-center gap-2">
+        <Avatar className="w-5 h-5">
+          <AvatarFallback className={`text-white text-[9px] ${
+            report.success === 0 || report.timed_out === 1
+              ? 'bg-gradient-to-br from-red-400 to-red-600'
+              : 'bg-gradient-to-br from-blue-400 to-purple-500'
+          }`}>
+            {agent.slice(0, 2).toUpperCase()}
+          </AvatarFallback>
+        </Avatar>
+        <span className="text-xs font-semibold text-neutral-800 dark:text-neutral-100 capitalize">{agent}</span>
+        {report.success === 0 && (
+          <XCircle className="w-3 h-3 text-red-500 shrink-0" />
+        )}
+        {report.timed_out === 1 && (
+          <Timer className="w-3 h-3 text-orange-500 shrink-0" title="Timed out" />
+        )}
+        <span className="text-[11px] text-neutral-400 dark:text-neutral-500 ml-auto whitespace-nowrap flex items-center gap-1">
+          {hasMeta ? (
+            <>
+              {report.duration_ms != null && <span>{formatDuration(report.duration_ms)}</span>}
+              {report.cost != null && (
+                <>
+                  <span className="text-neutral-300 dark:text-neutral-600">·</span>
+                  <span>${report.cost.toFixed(2)}</span>
+                </>
+              )}
+            </>
+          ) : timing ? (
+            <>
+              <span>{timing.ended}</span>
+              <span className="text-neutral-300 dark:text-neutral-600">·</span>
+              <span>{timing.duration}</span>
+            </>
+          ) : (
+            <span>{new Date(report.created_at).toLocaleString()}</span>
+          )}
+        </span>
+      </div>
+      {/* Row 2: Model + tokens (only if metadata available) */}
+      {hasMeta && (
+        <div className="flex items-center gap-1.5 pl-7 mt-0.5">
+          {report.model && (
+            <Badge variant="secondary" className="text-[9px] px-1 py-0 h-3.5">{report.model}</Badge>
+          )}
+          {(report.input_tokens != null || report.output_tokens != null) && (
+            <span className="text-[10px] text-neutral-400 dark:text-neutral-500">
+              {formatTokens(report.input_tokens)}↑ {formatTokens(report.output_tokens)}↓
+              {report.cache_read_tokens > 0 && <span className="ml-0.5">{formatTokens(report.cache_read_tokens)}⚡</span>}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -99,23 +176,7 @@ export default function AgentReportsCard({
               className="py-2.5 hover:bg-neutral-50 dark:hover:bg-neutral-800/50 cursor-pointer transition-colors -mx-1 px-1 rounded"
               onClick={() => { setFocusedReportId(comment.id); setReportsPanelOpen(true); }}
             >
-              <div className="flex items-center gap-2 mb-0.5">
-                <Avatar className="w-5 h-5">
-                  <AvatarFallback className="bg-gradient-to-br from-blue-400 to-purple-500 text-white text-[9px]">
-                    {(comment.agent || comment.author).slice(0, 2).toUpperCase()}
-                  </AvatarFallback>
-                </Avatar>
-                <span className="text-xs font-semibold text-neutral-800 dark:text-neutral-100 capitalize">{comment.agent || comment.author}</span>
-                {(() => { const t = parseTimingBlock(comment.body); return t ? (
-                  <span className="text-[11px] text-neutral-400 dark:text-neutral-500 ml-auto whitespace-nowrap flex items-center gap-1">
-                    <span>{t.ended}</span>
-                    <span className="text-neutral-300 dark:text-neutral-600">·</span>
-                    <span>{t.duration}</span>
-                  </span>
-                ) : (
-                  <span className="text-[11px] text-neutral-400 dark:text-neutral-500 ml-auto whitespace-nowrap">{new Date(comment.created_at).toLocaleString()}</span>
-                ); })()}
-              </div>
+              <ReportCardHeader report={comment} />
               <div className="text-xs text-neutral-500 dark:text-neutral-400 break-words leading-relaxed pl-7">
                 <ReportSummary reportId={comment.id} projectId={selectedProject?.id} summary={comment.summary} />
               </div>
