@@ -9,6 +9,7 @@ import Footer from '@/components/layout/Footer'
 import { OrchestratorStateCard, CostBudgetCard, ConfigCard } from '@/components/project/OrchestratorState'
 import WorkerCard from '@/components/project/WorkerCard'
 import IssuesSidebar from '@/components/project/IssuesSidebar'
+import HumanInterventionCard from '@/components/project/HumanInterventionCard'
 import AgentReportsCard from '@/components/project/AgentReportsCard'
 import ChatCard from '@/components/project/ChatCard'
 import SettingsPanel from '@/components/panels/SettingsPanel'
@@ -811,6 +812,12 @@ export default function ProjectView({
                 onNewChat={(session) => { setChatSession(session); setChatPanelOpen(true) }}
               />}
 
+              <HumanInterventionCard
+                issues={issues}
+                openIssueModal={openIssueModal}
+                setCreateIssueModal={setCreateIssueModal}
+                isWriteMode={isWriteMode}
+              />
               <IssuesSidebar
                 issues={issues}
                 issueFilter={issueFilter}
