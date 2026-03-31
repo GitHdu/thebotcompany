@@ -55,7 +55,7 @@ function formatTokens(n) {
   return `${n}`
 }
 
-function ReportCardHeader({ report }) {
+export function ReportCardHeader({ report }) {
   const agent = report.agent || report.author
 
   return (
