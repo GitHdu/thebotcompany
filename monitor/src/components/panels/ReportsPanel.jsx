@@ -3,11 +3,10 @@ import { RefreshCw, X } from 'lucide-react'
 import { Panel, PanelHeader, PanelContent } from '@/components/ui/panel'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { ReportCardHeader } from '@/components/project/AgentReportsCard'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import ScheduleDiagram, { parseScheduleBlock, stripAllMetaBlocks, parseTimingBlock, MetaBlockBadges } from '@/components/ScheduleDiagram'
-import LiveDuration from '@/components/layout/LiveDuration'
+import ScheduleDiagram, { parseScheduleBlock, stripAllMetaBlocks, MetaBlockBadges } from '@/components/ScheduleDiagram'
 
 // Lazy report summary component — triggers summarization on first render if missing
 const summaryCache = new Map() // reportId -> summary string | 'loading' | 'error'
@@ -96,22 +95,16 @@ export default function ReportsPanel({
           {liveAgentLog && (
             <>
               <div data-report-id="live">
-                <div className="flex items-center gap-2 mb-1 flex-wrap">
-                  <Avatar className="w-6 h-6 sm:w-8 sm:h-8">
-                    <AvatarFallback className="bg-gradient-to-br from-blue-400 to-purple-500 text-white text-xs">
-                      {liveAgentLog.agent.slice(0, 2).toUpperCase()}
-                    </AvatarFallback>
-                  </Avatar>
-                  <span className="text-sm font-semibold text-neutral-800 dark:text-neutral-100 capitalize">{liveAgentLog.agent}</span>
-                  <span className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
-                    <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                    Running
-                  </span>
-                  <span className="text-xs text-neutral-400 dark:text-neutral-500">
-                    <LiveDuration startTime={liveAgentLog.startTime} />
-                  </span>
-                  {liveAgentLog.model && <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">{liveAgentLog.model}</Badge>}
-                </div>
+                <ReportCardHeader report={{
+                  agent: liveAgentLog.agent,
+                  model: liveAgentLog.model,
+                  duration_ms: liveAgentLog.startTime ? Date.now() - new Date(liveAgentLog.startTime).getTime() : null,
+                  cost: liveAgentLog.cost || null,
+                  input_tokens: liveAgentLog.usage?.inputTokens || null,
+                  output_tokens: liveAgentLog.usage?.outputTokens || null,
+                  cache_read_tokens: liveAgentLog.usage?.cacheReadTokens || null,
+                  success: 1,
+                }} />
                 <div
                   ref={(el) => { liveLogRef.current = el; if (el && liveLogAtBottomRef.current) el.scrollTop = el.scrollHeight }}
                   onScroll={onLiveLogScroll}
@@ -134,23 +127,7 @@ export default function ReportsPanel({
             <div key={comment.id} data-report-id={comment.id}>
               {idx > 0 && <Separator className="my-4" />}
               <div className={`rounded-lg transition-colors duration-700 ${focusedReportId === comment.id ? 'bg-blue-50 dark:bg-blue-950/30 ring-1 ring-blue-300 dark:ring-blue-700 p-2 -m-2' : ''}`}>
-                <div className="flex items-center gap-2 mb-1 flex-wrap">
-                  <Avatar className="w-6 h-6 sm:w-8 sm:h-8">
-                    <AvatarFallback className="bg-gradient-to-br from-blue-400 to-purple-500 text-white text-xs">
-                      {(comment.agent || comment.author).slice(0, 2).toUpperCase()}
-                    </AvatarFallback>
-                  </Avatar>
-                  <span className="text-sm font-semibold text-neutral-800 dark:text-neutral-100 capitalize">{comment.agent || comment.author}</span>
-                  {(() => { const t = parseTimingBlock(comment.body); return t ? (
-                    <span className="text-xs text-neutral-400 dark:text-neutral-500 flex items-center gap-1.5">
-                      <span>{t.ended}</span>
-                      <span className="text-neutral-300 dark:text-neutral-600">·</span>
-                      <span>{t.duration}</span>
-                    </span>
-                  ) : (
-                    <span className="text-xs text-neutral-400 dark:text-neutral-500">{new Date(comment.created_at).toLocaleString()}</span>
-                  ); })()}
-                </div>
+                <ReportCardHeader report={comment} />
                 <ReportSummary reportId={comment.id} projectId={selectedProject?.id} summary={comment.summary} className="text-xs text-neutral-500 dark:text-neutral-400 italic block mb-1" />
                 <div className="text-sm text-neutral-700 dark:text-neutral-300 prose prose-sm prose-neutral dark:prose-invert max-w-none break-words [&_code]:break-all overflow-x-auto [&_table]:text-xs [&_pre]:overflow-x-auto">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{stripAllMetaBlocks(comment.body)}</ReactMarkdown>

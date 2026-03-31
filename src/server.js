@@ -315,7 +315,7 @@ class ProjectRunner {
     this.completionMessage = null;
     this.consecutiveFailures = 0; // Track consecutive agent failures for auto-pause
     this.currentAgentLog = [];
-    this.currentAgentModel = null;
+    this.currentAgentModel = null; this.currentAgentCost = 0; this.currentAgentUsage = null;
     this._repo = null;
   }
 
@@ -569,86 +569,55 @@ class ProjectRunner {
   }
 
   getCostSummary() {
-    const csvPath = path.join(this.agentDir, 'cost.csv');
-    if (!fs.existsSync(csvPath)) {
-      return { totalCost: 0, last24hCost: 0, lastCycleCost: 0, avgCycleCost: 0, lastCycleDuration: 0, avgCycleDuration: 0, agents: {} };
-    }
+    const empty = { totalCost: 0, last24hCost: 0, lastCycleCost: 0, avgCycleCost: 0, lastCycleDuration: 0, avgCycleDuration: 0, agents: {} };
     try {
-      const lines = fs.readFileSync(csvPath, 'utf-8').split('\n').filter(l => l.trim());
-      if (lines.length <= 1) return { totalCost: 0, last24hCost: 0, lastCycleCost: 0, avgCycleCost: 0, lastCycleDuration: 0, avgCycleDuration: 0, agents: {} };
+      const db = this.getDb();
+      // Ensure cost columns exist (migration)
+      try { db.exec('ALTER TABLE reports ADD COLUMN cost REAL'); } catch {}
+      try { db.exec('ALTER TABLE reports ADD COLUMN duration_ms INTEGER'); } catch {}
 
-      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-      let totalCost = 0;
-      let last24hCost = 0;
+      const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+      // Total cost
+      const totalCost = db.prepare('SELECT COALESCE(SUM(cost), 0) as v FROM reports').get().v;
+      const last24hCost = db.prepare('SELECT COALESCE(SUM(cost), 0) as v FROM reports WHERE created_at > ?').get(cutoff).v;
+
+      // Per-cycle data
+      const cycles = db.prepare('SELECT cycle, SUM(cost) as cost, SUM(duration_ms) as duration FROM reports WHERE cost IS NOT NULL GROUP BY cycle ORDER BY cycle ASC').all();
+      let lastCycleCost = 0, avgCycleCost = 0, lastCycleDuration = 0, avgCycleDuration = 0;
+      if (cycles.length > 0) {
+        const last = cycles[cycles.length - 1];
+        lastCycleCost = last.cost || 0;
+        lastCycleDuration = last.duration || 0;
+        const totalCycleCost = cycles.reduce((s, c) => s + (c.cost || 0), 0);
+        const totalCycleDuration = cycles.reduce((s, c) => s + (c.duration || 0), 0);
+        avgCycleCost = totalCycleCost / cycles.length;
+        avgCycleDuration = totalCycleDuration / cycles.length;
+      }
+
+      // Per-agent data
+      const agentRows = db.prepare(`SELECT agent,
+        COALESCE(SUM(cost), 0) as totalCost,
+        COALESCE(SUM(CASE WHEN created_at > ? THEN cost ELSE 0 END), 0) as last24hCost,
+        COUNT(*) as callCount
+        FROM reports WHERE cost IS NOT NULL GROUP BY agent`).all(cutoff);
       const agents = {};
-      const cycleData = new Map(); // cycle -> { cost, duration }
-
-      for (let i = 1; i < lines.length; i++) {
-        const parts = lines[i].split(',');
-        if (parts.length < 4) continue;
-        const time = new Date(parts[0]).getTime();
-        const cycle = parseInt(parts[1]);
-        const agentName = parts[2];
-        const cost = parseFloat(parts[3]);
-        const duration = parts.length >= 5 ? parseInt(parts[4]) : 0;
-        if (isNaN(cost)) continue;
-
-        totalCost += cost;
-        
-        // Track cycle costs and durations
-        if (!isNaN(cycle)) {
-          if (!cycleData.has(cycle)) {
-            cycleData.set(cycle, { cost: 0, duration: 0 });
-          }
-          const data = cycleData.get(cycle);
-          data.cost += cost;
-          data.duration += duration; // Sum agent durations for cycle total
-        }
-        
-        if (!agents[agentName]) {
-          agents[agentName] = { totalCost: 0, last24hCost: 0, callCount: 0, lastCallCost: 0 };
-        }
-        agents[agentName].totalCost += cost;
-        agents[agentName].callCount += 1;
-        agents[agentName].lastCallCost = cost; // Overwrite with latest
-
-        if (time >= cutoff) {
-          last24hCost += cost;
-          agents[agentName].last24hCost += cost;
-        }
+      for (const row of agentRows) {
+        const lastCall = db.prepare('SELECT cost FROM reports WHERE agent = ? AND cost IS NOT NULL ORDER BY id DESC LIMIT 1').get(row.agent);
+        agents[row.agent] = {
+          totalCost: row.totalCost,
+          last24hCost: row.last24hCost,
+          callCount: row.callCount,
+          lastCallCost: lastCall?.cost || 0,
+          avgCallCost: row.callCount > 0 ? row.totalCost / row.callCount : 0,
+        };
       }
 
-      // Compute average cost per agent
-      for (const name of Object.keys(agents)) {
-        agents[name].avgCallCost = agents[name].callCount > 0 
-          ? agents[name].totalCost / agents[name].callCount 
-          : 0;
-      }
-
-      // Compute last/avg cycle cost and duration
-      let lastCycleCost = 0;
-      let avgCycleCost = 0;
-      let lastCycleDuration = 0;
-      let avgCycleDuration = 0;
-      if (cycleData.size > 0) {
-        const cycles = Array.from(cycleData.keys()).sort((a, b) => a - b);
-        const lastData = cycleData.get(cycles[cycles.length - 1]);
-        lastCycleCost = lastData?.cost || 0;
-        lastCycleDuration = lastData?.duration || 0;
-        
-        let totalCycleCost = 0;
-        let totalCycleDuration = 0;
-        for (const data of cycleData.values()) {
-          totalCycleCost += data.cost;
-          totalCycleDuration += data.duration;
-        }
-        avgCycleCost = totalCycleCost / cycleData.size;
-        avgCycleDuration = totalCycleDuration / cycleData.size;
-      }
+      db.close();
 
       return { totalCost, last24hCost, lastCycleCost, avgCycleCost, lastCycleDuration, avgCycleDuration, agents };
     } catch {
-      return { totalCost: 0, last24hCost: 0, lastCycleCost: 0, avgCycleCost: 0, lastCycleDuration: 0, avgCycleDuration: 0, agents: {} };
+      return empty;
     }
   }
 
@@ -665,46 +634,25 @@ class ProjectRunner {
 
     const minFloor = config.cycleIntervalMs > 0 ? config.cycleIntervalMs : MIN_SLEEP;
 
-    // Parse cost.csv to get per-cycle data
-    const csvPath = path.join(this.agentDir, 'cost.csv');
-    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-    let cycleCosts = [];    // { cycle, totalCost, totalDuration }
+    // Query cost data from SQLite reports table
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    let cycleCosts = [];
     let spent24h = 0;
     let oldestTime24h = Infinity;
 
-    if (fs.existsSync(csvPath)) {
-      try {
-        const lines = fs.readFileSync(csvPath, 'utf-8').split('\n').filter(l => l.trim());
-        const cycleMap = new Map(); // cycle -> { cost, duration }
+    try {
+      const db = this.getDb();
+      try { db.exec('ALTER TABLE reports ADD COLUMN cost REAL'); } catch {}
+      try { db.exec('ALTER TABLE reports ADD COLUMN duration_ms INTEGER'); } catch {}
 
-        for (let i = 1; i < lines.length; i++) {
-          const parts = lines[i].split(',');
-          if (parts.length < 4) continue;
-          const time = new Date(parts[0]).getTime();
-          const cycle = parseInt(parts[1]);
-          const cost = parseFloat(parts[3]);
-          const duration = parts.length >= 5 ? parseInt(parts[4]) : 0;
-          if (isNaN(cost)) continue;
+      spent24h = db.prepare('SELECT COALESCE(SUM(cost), 0) as v FROM reports WHERE created_at > ?').get(cutoff).v;
+      const oldest = db.prepare('SELECT MIN(created_at) as v FROM reports WHERE created_at > ?').get(cutoff);
+      if (oldest?.v) oldestTime24h = new Date(oldest.v).getTime();
 
-          // Track 24h spending (raw cost always counts)
-          if (time >= cutoff) {
-            spent24h += cost;
-            if (time < oldestTime24h) oldestTime24h = time;
-          }
-
-          // Group by cycle for EMA
-          if (!cycleMap.has(cycle)) cycleMap.set(cycle, { cost: 0, duration: 0 });
-          const entry = cycleMap.get(cycle);
-          entry.cost += cost;
-          entry.duration = Math.max(entry.duration, duration); // agents run sequentially, use max as proxy
-        }
-
-        // Sort cycles by number
-        cycleCosts = Array.from(cycleMap.entries())
-          .sort((a, b) => a[0] - b[0])
-          .map(([, v]) => v);
-      } catch {}
-    }
+      const cycles = db.prepare('SELECT cycle, SUM(cost) as cost, MAX(duration_ms) as duration FROM reports WHERE cost IS NOT NULL GROUP BY cycle ORDER BY cycle ASC').all();
+      cycleCosts = cycles.map(c => ({ cost: c.cost || 0, duration: c.duration || 0 }));
+      db.close();
+    } catch {}
 
     const remaining = budgetPer24h - spent24h;
 
@@ -943,7 +891,7 @@ class ProjectRunner {
       this.currentAgent = null;
       this.currentAgentStartTime = null;
       this.currentAgentLog = [];
-      this.currentAgentModel = null;
+      this.currentAgentModel = null; this.currentAgentCost = 0; this.currentAgentUsage = null;
     }
     this.isPaused = true;
     this.pauseReason = 'Bootstrapping';
@@ -1719,7 +1667,7 @@ class ProjectRunner {
   }
 
   // Post-processing shared by both CLI and API agent runs
-  _postProcessAgentRun(agent, config, { resultText, cost, durationMs, killedByTimeout, exitCode, rawOutput, apiSuccess }) {
+  _postProcessAgentRun(agent, config, { resultText, cost, durationMs, killedByTimeout, exitCode, rawOutput, apiSuccess, usage }) {
     const durationStr = `${Math.floor(durationMs / 60000)}m ${Math.floor((durationMs % 60000) / 1000)}s`;
     // For API runner: use apiSuccess if provided; for CLI runner: use exitCode
     const success = !killedByTimeout && (apiSuccess !== undefined ? apiSuccess : (exitCode === 0 || exitCode === undefined));
@@ -1750,18 +1698,7 @@ class ProjectRunner {
       log(`Failed to log response for ${agent.name}: ${e.message}`, this.id);
     }
 
-    // Append cost row to cost.csv
-    if (cost !== undefined) {
-      try {
-        const csvPath = path.join(this.agentDir, 'cost.csv');
-        if (!fs.existsSync(csvPath)) {
-          fs.writeFileSync(csvPath, 'time,cycle,agent,cost,durationMs\n');
-        }
-        fs.appendFileSync(csvPath, `${new Date().toISOString()},${this.cycleCount},${agent.name},${cost.toFixed(6)},${durationMs}\n`);
-      } catch {}
-    }
-
-    // Write agent report to SQLite
+    // Write agent report to SQLite (cost data included — no longer writes to cost.csv)
     if (resultText || killedByTimeout || !success) {
       try {
         let reportBody;
@@ -1806,7 +1743,21 @@ class ProjectRunner {
           created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
         )`);
         try { db.exec('ALTER TABLE reports ADD COLUMN summary TEXT'); } catch {}
-        db.prepare('INSERT INTO reports (cycle, agent, body, created_at) VALUES (?, ?, ?, ?)').run(this.cycleCount, agent.name, reportBody, new Date().toISOString());
+        try { db.exec('ALTER TABLE reports ADD COLUMN cost REAL'); } catch {}
+        try { db.exec('ALTER TABLE reports ADD COLUMN duration_ms INTEGER'); } catch {}
+        try { db.exec('ALTER TABLE reports ADD COLUMN input_tokens INTEGER'); } catch {}
+        try { db.exec('ALTER TABLE reports ADD COLUMN output_tokens INTEGER'); } catch {}
+        try { db.exec('ALTER TABLE reports ADD COLUMN cache_read_tokens INTEGER'); } catch {}
+        try { db.exec('ALTER TABLE reports ADD COLUMN success INTEGER'); } catch {}
+        try { db.exec('ALTER TABLE reports ADD COLUMN model TEXT'); } catch {}
+        try { db.exec('ALTER TABLE reports ADD COLUMN timed_out INTEGER'); } catch {}
+        db.prepare(`INSERT INTO reports (cycle, agent, body, created_at, cost, duration_ms, input_tokens, output_tokens, cache_read_tokens, success, model, timed_out)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+          this.cycleCount, agent.name, reportBody, new Date().toISOString(),
+          cost ?? null, durationMs ?? null,
+          usage?.inputTokens ?? null, usage?.outputTokens ?? null, usage?.cacheReadTokens ?? null,
+          success ? 1 : 0, this.currentAgentModel ?? null, killedByTimeout ? 1 : 0
+        );
         const lastId = db.prepare('SELECT last_insert_rowid() as id').get().id;
         db.close();
         log(`Saved report for ${agent.name}`, this.id);
@@ -1825,7 +1776,7 @@ class ProjectRunner {
     this.currentAgentStartTime = null;
     this.currentAgentLog = [];
     broadcastStatusUpdate(this.id);
-    this.currentAgentModel = null;
+    this.currentAgentModel = null; this.currentAgentCost = 0; this.currentAgentUsage = null;
 
     return { success, resultText, killedByTimeout: !!killedByTimeout };
   }
@@ -1856,7 +1807,7 @@ class ProjectRunner {
       this.currentAgentProcess = null;
       this.currentAgentStartTime = null;
       this.currentAgentLog = [];
-      this.currentAgentModel = null;
+      this.currentAgentModel = null; this.currentAgentCost = 0; this.currentAgentUsage = null;
       return { success: false, resultText: '' };
     }
 
@@ -1899,7 +1850,7 @@ class ProjectRunner {
       this.currentAgentProcess = null;
       this.currentAgentStartTime = null;
       this.currentAgentLog = [];
-      this.currentAgentModel = null;
+      this.currentAgentModel = null; this.currentAgentCost = 0; this.currentAgentUsage = null;
       broadcastStatusUpdate(this.id);
       return { error: 'no_token', message: 'No API key configured. Add one in Settings > Credentials.' };
     }
@@ -1946,6 +1897,10 @@ class ProjectRunner {
         this.currentAgentLog.push({ time: Date.now(), msg });
         if (this.currentAgentLog.length > 500) this.currentAgentLog.shift();
       },
+      onProgress: ({ usage, cost }) => {
+        this.currentAgentCost = cost;
+        this.currentAgentUsage = usage;
+      },
     });
 
     return this._postProcessAgentRun(agent, config, {
@@ -1954,6 +1909,7 @@ class ProjectRunner {
       durationMs: result.durationMs,
       killedByTimeout: result.timedOut || false,
       apiSuccess: result.success,
+      usage: result.usage,
       rawOutput: JSON.stringify({ usage: result.usage, resultText: result.resultText }),
     });
   }
@@ -2838,6 +2794,8 @@ const server = http.createServer(async (req, res) => {
         agent: runner.currentAgent,
         model: runner.currentAgentModel,
         startTime: runner.currentAgentStartTime,
+        cost: runner.currentAgentCost || 0,
+        usage: runner.currentAgentUsage || null,
         log: running ? runner.currentAgentLog : [],
       }));
       return;
