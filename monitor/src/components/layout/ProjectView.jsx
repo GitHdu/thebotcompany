@@ -742,8 +742,8 @@ export default function ProjectView({
 
               <Card>
                 <CardHeader><CardTitle className="flex items-center gap-2"><Sparkles className="w-4 h-4" />Managers ({agents.managers.length})</CardTitle></CardHeader>
-                <CardContent>
-                  <div className="space-y-2 max-h-96 overflow-y-auto">
+                <CardContent className="flex-1 flex flex-col overflow-hidden">
+                  <div className="space-y-2 flex-1 overflow-y-auto">
                     {agents.managers.map((agent) => (
                       <WorkerCard
                         key={agent.name}
@@ -764,8 +764,8 @@ export default function ProjectView({
 
               <Card>
                 <CardHeader><CardTitle className="flex items-center gap-2"><Users className="w-4 h-4" />Workers ({agents.workers.length})</CardTitle></CardHeader>
-                <CardContent>
-                  <div className="space-y-2 max-h-96 overflow-y-auto">
+                <CardContent className="flex-1 flex flex-col overflow-hidden">
+                  <div className="space-y-2 flex-1 overflow-y-auto">
                     {agents.workers.map((agent) => (
                       <WorkerCard
                         key={agent.name}
