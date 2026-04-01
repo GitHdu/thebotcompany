@@ -279,18 +279,7 @@ export default function ChatPanel({ open, onClose, selectedProject, chatSession,
     }
   }, [open, chatSession?.id])
 
-  const changeModelTier = async (tier) => {
-    setModelTier(tier)
-    if (chatSession?.id && !chatSession._temp) {
-      try {
-        await authFetch(`/api/projects/${selectedProject.id}/chats/${chatSession.id}/model`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ modelTier: tier }),
-        })
-      } catch {}
-    }
-  }
+
 
   const sendMessage = async () => {
     if (!input.trim() || streaming || !chatSession || !selectedProject) return
@@ -303,7 +292,7 @@ export default function ChatPanel({ open, onClose, selectedProject, chatSession,
         const res = await authFetch(`/api/projects/${selectedProject.id}/chats`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ modelTier }),
+          body: JSON.stringify({}),
         })
         if (!res.ok) return
         const data = await res.json()
@@ -333,7 +322,7 @@ export default function ChatPanel({ open, onClose, selectedProject, chatSession,
       const response = await authFetch(`/api/projects/${selectedProject.id}/chats/${activeSession.id}/message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userMsg }),
+        body: JSON.stringify({ message: userMsg, modelTier }),
       })
 
       const reader = response.body.getReader()
@@ -479,7 +468,7 @@ export default function ChatPanel({ open, onClose, selectedProject, chatSession,
           </span>
           <select
             value={modelTier}
-            onChange={(e) => changeModelTier(e.target.value)}
+            onChange={(e) => setModelTier(e.target.value)}
             className="px-2 py-0.5 text-xs bg-neutral-100 dark:bg-neutral-700 border border-neutral-200 dark:border-neutral-600 rounded text-neutral-700 dark:text-neutral-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
           >
             <option value="high">High</option>

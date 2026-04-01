@@ -89,7 +89,7 @@ function getChatDb(agentDir) {
     CREATE TABLE IF NOT EXISTS chat_sessions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       title TEXT NOT NULL DEFAULT 'New Chat',
-      model_tier TEXT DEFAULT 'high',
+
       created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
       updated_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
     );
@@ -102,8 +102,7 @@ function getChatDb(agentDir) {
       created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
     );
   `);
-  // Migration: add model_tier column if missing
-  try { db.exec("ALTER TABLE chat_sessions ADD COLUMN model_tier TEXT DEFAULT 'high'"); } catch {}
+
   return db;
 }
 
@@ -126,20 +125,11 @@ export function listSessions(agentDir) {
   }
 }
 
-export function createSession(agentDir, title, modelTier) {
+export function createSession(agentDir, title) {
   const db = getChatDb(agentDir);
   try {
-    const result = db.prepare('INSERT INTO chat_sessions (title, model_tier) VALUES (?, ?)').run(title || 'New Chat', modelTier || 'high');
+    const result = db.prepare('INSERT INTO chat_sessions (title) VALUES (?)').run(title || 'New Chat');
     return db.prepare('SELECT * FROM chat_sessions WHERE id = ?').get(result.lastInsertRowid);
-  } finally {
-    db.close();
-  }
-}
-
-export function updateSessionModelTier(agentDir, chatId, modelTier) {
-  const db = getChatDb(agentDir);
-  try {
-    db.prepare('UPDATE chat_sessions SET model_tier = ? WHERE id = ?').run(modelTier, chatId);
   } finally {
     db.close();
   }

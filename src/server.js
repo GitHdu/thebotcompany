@@ -14,7 +14,7 @@ import { spawn, execSync } from 'child_process';
 import yaml from 'js-yaml';
 import Database from 'better-sqlite3';
 import { runAgentWithAPI } from './agent-runner.js';
-import { listSessions as chatListSessions, createSession as chatCreateSession, getSession as chatGetSession, deleteSession as chatDeleteSession, streamChatMessage, getActiveStream, isStreaming as isChatStreaming, saveMessage as chatSaveMessage, updateSessionModelTier as chatUpdateModelTier } from './chat.js';
+import { listSessions as chatListSessions, createSession as chatCreateSession, getSession as chatGetSession, deleteSession as chatDeleteSession, streamChatMessage, getActiveStream, isStreaming as isChatStreaming, saveMessage as chatSaveMessage } from './chat.js';
 import { resolveModel, callModel, buildUserMessage, getModels as getPiModels } from './providers/index.js';
 import { startOAuthLogin, submitManualCode, checkOAuthStatus, getAccessToken as getOAuthAccessToken, clearCredentials as clearOAuthCredentials, listOAuthProviders, loadCredentials as loadOAuthCredentials } from './oauth.js';
 import {
@@ -3402,7 +3402,7 @@ const server = http.createServer(async (req, res) => {
       req.on('end', () => {
         try {
           const data = body ? JSON.parse(body) : {};
-          const session = chatCreateSession(runner.agentDir, data.title, data.modelTier);
+          const session = chatCreateSession(runner.agentDir, data.title);
           res.writeHead(201, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ session }));
         } catch (e) {
@@ -3456,32 +3456,6 @@ const server = http.createServer(async (req, res) => {
     }
 
     // DELETE /api/projects/:id/chats/:chatId — delete session
-    // PATCH /api/projects/:id/chats/:chatId/model — update model tier
-    const chatModelMatch = req.method === 'PATCH' && subPath.match(/^chats\/(\d+)\/model$/);
-    if (chatModelMatch) {
-      if (!requireWrite(req, res)) return;
-      const chatId = parseInt(chatModelMatch[1]);
-      let body = '';
-      req.on('data', chunk => body += chunk);
-      req.on('end', () => {
-        try {
-          const data = JSON.parse(body);
-          if (!data.modelTier) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'modelTier is required' }));
-            return;
-          }
-          chatUpdateModelTier(runner.agentDir, chatId, data.modelTier);
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: true, modelTier: data.modelTier }));
-        } catch (e) {
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: e.message }));
-        }
-      });
-      return;
-    }
-
     const chatDeleteMatch = req.method === 'DELETE' && subPath.match(/^chats\/(\d+)$/);
     if (chatDeleteMatch) {
       if (!requireWrite(req, res)) return;
@@ -3524,9 +3498,8 @@ const server = http.createServer(async (req, res) => {
             return;
           }
 
-          // Resolve model from session's model tier
-          const chatSession = chatGetSession(runner.agentDir, chatId);
-          const modelTier = chatSession?.model_tier || 'high';
+          // Resolve model from request's model tier (frontend sends it with each message)
+          const modelTier = data.modelTier || 'high';
           const providerHint = keyResult.provider || detectProviderFromToken(keyResult.token);
           const resolved = resolveModelTier(modelTier, providerHint, config.models);
 
