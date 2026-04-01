@@ -6,9 +6,10 @@ import { Users, User, Sparkles, Settings, ScrollText, RefreshCw, Pause, Play, Ro
 import { PanelSlot, closeAllPanels } from '@/components/ui/panel'
 
 import Footer from '@/components/layout/Footer'
-import { OrchestratorStateCard, CostBudgetCard, ConfigCard } from '@/components/project/OrchestratorState'
+import { OrchestratorStateCard, CostBudgetCard } from '@/components/project/OrchestratorState'
 import WorkerCard from '@/components/project/WorkerCard'
 import IssuesSidebar from '@/components/project/IssuesSidebar'
+import HumanInterventionCard from '@/components/project/HumanInterventionCard'
 import AgentReportsCard from '@/components/project/AgentReportsCard'
 import ChatCard from '@/components/project/ChatCard'
 import SettingsPanel from '@/components/panels/SettingsPanel'
@@ -714,9 +715,6 @@ export default function ProjectView({
               <CostBudgetCard
                 selectedProject={selectedProject}
                 setBudgetInfoModal={setBudgetInfoModal}
-              />
-
-              <ConfigCard
                 configForm={configForm}
                 configError={configError}
                 configDirty={configDirty}
@@ -727,13 +725,25 @@ export default function ProjectView({
                 isWriteMode={isWriteMode}
                 setIntervalInfoModal={setIntervalInfoModal}
                 setTimeoutInfoModal={setTimeoutInfoModal}
-                setBudgetInfoModal={setBudgetInfoModal}
               />
 
-              <Card>
+              <HumanInterventionCard
+                issues={issues}
+                openIssueModal={openIssueModal}
+                setCreateIssueModal={setCreateIssueModal}
+                isWriteMode={isWriteMode}
+              />
+
+              {isWriteMode && <ChatCard
+                selectedProject={selectedProject}
+                onOpenChat={(session) => { setChatSession(session); setChatPanelOpen(true) }}
+                onNewChat={(session) => { setChatSession(session); setChatPanelOpen(true) }}
+              />}
+
+              <Card className="h-[500px]">
                 <CardHeader><CardTitle className="flex items-center gap-2"><Sparkles className="w-4 h-4" />Managers ({agents.managers.length})</CardTitle></CardHeader>
-                <CardContent>
-                  <div className="space-y-2 max-h-96 overflow-y-auto">
+                <CardContent className="flex-1 overflow-hidden">
+                  <div className="space-y-2 h-full overflow-y-auto">
                     {agents.managers.map((agent) => (
                       <WorkerCard
                         key={agent.name}
@@ -752,10 +762,10 @@ export default function ProjectView({
                 </CardContent>
               </Card>
 
-              <Card>
+              <Card className="h-[500px]">
                 <CardHeader><CardTitle className="flex items-center gap-2"><Users className="w-4 h-4" />Workers ({agents.workers.length})</CardTitle></CardHeader>
-                <CardContent>
-                  <div className="space-y-2 max-h-96 overflow-y-auto">
+                <CardContent className="flex-1 overflow-hidden">
+                  <div className="space-y-2 h-full overflow-y-auto">
                     {agents.workers.map((agent) => (
                       <WorkerCard
                         key={agent.name}
@@ -804,12 +814,6 @@ export default function ProjectView({
                 setFocusedReportId={setFocusedReportId}
                 setReportsPanelOpen={setReportsPanelOpen}
               />
-
-              {isWriteMode && <ChatCard
-                selectedProject={selectedProject}
-                onOpenChat={(session) => { setChatSession(session); setChatPanelOpen(true) }}
-                onNewChat={(session) => { setChatSession(session); setChatPanelOpen(true) }}
-              />}
 
               <IssuesSidebar
                 issues={issues}

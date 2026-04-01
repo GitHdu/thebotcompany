@@ -147,10 +147,10 @@ function DangerZone({ controlAction, selectedProject }) {
   )
 }
 
-export function CostBudgetCard({ selectedProject, setBudgetInfoModal }) {
+export function CostBudgetCard({ selectedProject, setBudgetInfoModal, configForm, configError, configDirty, configSaving, updateConfigField, resetConfig, saveConfig, isWriteMode, setIntervalInfoModal, setTimeoutInfoModal }) {
   return (
     <Card>
-      <CardHeader><CardTitle className="flex items-center gap-2"><DollarSign className="w-4 h-4" />Cost & Budget</CardTitle></CardHeader>
+      <CardHeader><CardTitle className="flex items-center gap-2"><DollarSign className="w-4 h-4" />Cost, Budget & Config</CardTitle></CardHeader>
       <CardContent>
         <div className="space-y-3">
           <div className="flex justify-between items-center">
@@ -210,41 +210,11 @@ export function CostBudgetCard({ selectedProject, setBudgetInfoModal }) {
               )}
             </>
           )}
-          <div className="pt-2 border-t">
-            <button
-              onClick={() => setBudgetInfoModal(true)}
-              className="text-xs text-blue-500 hover:text-blue-700 dark:hover:text-blue-300 hover:underline"
-            >
-              How budget works →
-            </button>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
-
-export function ConfigCard({
-  configForm,
-  configError,
-  configDirty,
-  configSaving,
-  updateConfigField,
-  resetConfig,
-  saveConfig,
-  isWriteMode,
-  setIntervalInfoModal,
-  setTimeoutInfoModal,
-  setBudgetInfoModal,
-}) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2"><Settings className="w-4 h-4" />Configuration</CardTitle>
-      </CardHeader>
-      <CardContent>
-        {configError && <div className="mb-3 p-2 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded text-red-700 dark:text-red-300 text-xs">{configError}</div>}
-        <div className="space-y-3 text-sm">
+          {/* Configuration */}
+          <div className="pt-3 border-t mt-3">
+            <h4 className="text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide mb-2">Configuration</h4>
+            {configError && <div className="mb-3 p-2 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded text-red-700 dark:text-red-300 text-xs">{configError}</div>}
+            <div className="space-y-3 text-sm">
           <div className="flex items-center justify-between">
             <label className="text-neutral-600 dark:text-neutral-300 flex items-center gap-1">
               Interval
@@ -310,21 +280,31 @@ export function ConfigCard({
             </div>
           </div>
         </div>
-        {configDirty && (
-          <div className="flex items-center justify-end gap-2 mt-3 pt-3 border-t border-neutral-100 dark:border-neutral-700">
-            <Badge variant="warning">Unsaved</Badge>
-            <button onClick={resetConfig} className="px-2 py-1 text-xs text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200">
-              Reset
-            </button>
-            {isWriteMode && <button 
-              onClick={saveConfig} 
-              disabled={configSaving}
-              className="px-3 py-1.5 rounded text-xs font-medium inline-flex items-center bg-blue-500 hover:bg-blue-600 text-white"
+          {configDirty && (
+            <div className="flex items-center justify-end gap-2 mt-3 pt-3 border-t border-neutral-100 dark:border-neutral-700">
+              <Badge variant="warning">Unsaved</Badge>
+              <button onClick={resetConfig} className="px-2 py-1 text-xs text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200">
+                Reset
+              </button>
+              {isWriteMode && <button 
+                onClick={saveConfig} 
+                disabled={configSaving}
+                className="px-3 py-1.5 rounded text-xs font-medium inline-flex items-center bg-blue-500 hover:bg-blue-600 text-white"
+              >
+                <Save className="w-3 h-3 mr-1.5" />{configSaving ? '...' : 'Save'}
+              </button>}
+            </div>
+          )}
+          <div className="pt-2 border-t mt-3">
+            <button
+              onClick={() => setBudgetInfoModal(true)}
+              className="text-xs text-blue-500 hover:text-blue-700 dark:hover:text-blue-300 hover:underline"
             >
-              <Save className="w-3 h-3 mr-1.5" />{configSaving ? '...' : 'Save'}
-            </button>}
+              How budget works →
+            </button>
           </div>
-        )}
+          </div>
+        </div>
       </CardContent>
     </Card>
   )
