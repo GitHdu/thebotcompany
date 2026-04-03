@@ -2,7 +2,6 @@ import React from 'react'
 import { CircleDot, User, UserCheck, MessageSquare } from 'lucide-react'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Separator } from '@/components/ui/separator'
 
 export default function IssuesSidebar({
   issues,
@@ -46,9 +45,8 @@ export default function IssuesSidebar({
               </div>
             </div>
           ))}
-          {issues.length === 0 && <p className="text-sm text-neutral-400 dark:text-neutral-500">No issues</p>}
+          {filteredIssues.length === 0 && <p className="text-sm text-neutral-400 dark:text-neutral-500">No issues</p>}
         </div>
-        <Separator className="my-3 shrink-0" />
       </CardContent>
     </Card>
   )
