@@ -9,14 +9,11 @@ import Footer from '@/components/layout/Footer'
 import { OrchestratorStateCard, CostBudgetCard } from '@/components/project/OrchestratorState'
 import WorkerCard from '@/components/project/WorkerCard'
 import IssuesSidebar from '@/components/project/IssuesSidebar'
-import HumanInterventionCard from '@/components/project/HumanInterventionCard'
 import AgentReportsCard from '@/components/project/AgentReportsCard'
-import ChatCard from '@/components/project/ChatCard'
 import SettingsPanel from '@/components/panels/SettingsPanel'
 import NotificationPanel from '@/components/panels/NotificationPanel'
 import BootstrapPanel from '@/components/panels/BootstrapPanel'
 import ReportsPanel from '@/components/panels/ReportsPanel'
-import ChatPanel from '@/components/panels/ChatPanel'
 import AgentDetailPanel from '@/components/panels/AgentDetailPanel'
 import IssueDetailPanel from '@/components/panels/IssueDetailPanel'
 import ProjectSettingsPanel from '@/components/panels/ProjectSettingsPanel'
@@ -26,7 +23,6 @@ import AgentSettingsModal from '@/components/modals/AgentSettingsModal'
 import BudgetInfoModal from '@/components/modals/BudgetInfoModal'
 import IntervalInfoModal from '@/components/modals/IntervalInfoModal'
 import TimeoutInfoModal from '@/components/modals/TimeoutInfoModal'
-import CreateIssueModal from '@/components/modals/CreateIssueModal'
 import { useAuth } from '@/hooks/useAuth'
 import { useNotifications } from '@/contexts/NotificationContext'
 import { useToast } from '@/contexts/ToastContext'
@@ -49,7 +45,6 @@ export default function ProjectView({
   const { isWriteMode, handleLogout, setLoginModal, loginModal, loginInput, setLoginInput, handleLogin, authFetch } = useAuth()
   const { unreadCount } = useNotifications()
   const { showToast, toast, setToast } = useToast()
-  const humanfreeMode = true
 
   // Project-specific state
   const [logs, setLogs] = useState([])
@@ -98,7 +93,6 @@ export default function ProjectView({
   // Modals
   const [agentModal, setAgentModal] = useState({ open: false, agent: null, data: null, loading: false, tab: 'skill' })
   const [issueModal, setIssueModal] = useState({ open: false, issue: null, comments: [], loading: false })
-  const [createIssueModal, setCreateIssueModal] = useState({ open: false, title: '', body: '', receiver: '', creating: false, error: null, focusedField: 'title' })
   const modKey = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent) ? '⌘' : 'Ctrl'
   const [bootstrapModal, setBootstrapModal] = useState({ open: false, loading: false, preview: null, error: null, executing: false, removeRoadmap: true, specMode: 'keep', specContent: '', whatToBuild: '', successCriteria: '' })
   const [budgetInfoModal, setBudgetInfoModal] = useState(false)
@@ -107,8 +101,6 @@ export default function ProjectView({
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [showApiKeyHelp, setShowApiKeyHelp] = useState(false)
   const [projectSettingsOpen, setProjectSettingsOpen] = useState(false)
-  const [chatPanelOpen, setChatPanelOpen] = useState(false)
-  const [chatSession, setChatSession] = useState(null)
 
   // Project settings (token state now managed inside ProjectSettingsPanel)
 
@@ -208,12 +200,9 @@ export default function ProjectView({
     if (selectedProject) {
       // Reset state for new project — close all side panels
       closeAllPanels()
-      setChatPanelOpen(false)
-      setChatSession(null)
       setIssueModal({ open: false, issue: null, comments: [], loading: false })
       setReportsPanelOpen(false)
       setAgentModal({ open: false, agent: null, data: null, loading: false, tab: 'skill' })
-      setCreateIssueModal(prev => ({ ...prev, open: false }))
       setProjectSettingsOpen(false)
       setSettingsOpen(false)
       setLogs([])
@@ -473,33 +462,6 @@ export default function ProjectView({
     }
   }
 
-  const createIssue = async () => {
-    if (humanfreeMode) return
-    if (!createIssueModal.title.trim()) return
-    setCreateIssueModal(prev => ({ ...prev, creating: true, error: null }))
-    try {
-      const res = await authFetch(projectApi('/issues/create'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: createIssueModal.title.trim(),
-          body: createIssueModal.body.trim(),
-          creator: 'human',
-          assignee: createIssueModal.receiver || null
-        })
-      })
-      const data = await res.json()
-      if (data.success) {
-        setCreateIssueModal({ open: false, title: '', body: '', receiver: '', creating: false, error: null, focusedField: 'title' })
-        await fetchProjectData()
-      } else {
-        setCreateIssueModal(prev => ({ ...prev, creating: false, error: data.error || 'Failed to create issue' }))
-      }
-    } catch (err) {
-      setCreateIssueModal(prev => ({ ...prev, creating: false, error: err.message }))
-    }
-  }
-
   const openIssueModal = async (issueId) => {
     if (!selectedProject) return
     setIssueModal({ open: true, issue: null, comments: [], loading: true })
@@ -729,19 +691,6 @@ export default function ProjectView({
                 setTimeoutInfoModal={setTimeoutInfoModal}
               />
 
-              {!humanfreeMode && <HumanInterventionCard
-                issues={issues}
-                openIssueModal={openIssueModal}
-                setCreateIssueModal={setCreateIssueModal}
-                isWriteMode={isWriteMode}
-              />}
-
-              {isWriteMode && !humanfreeMode && <ChatCard
-                selectedProject={selectedProject}
-                onOpenChat={(session) => { setChatSession(session); setChatPanelOpen(true) }}
-                onNewChat={(session) => { setChatSession(session); setChatPanelOpen(true) }}
-              />}
-
               <Card className="h-[500px]">
                 <CardHeader><CardTitle className="flex items-center gap-2"><Sparkles className="w-4 h-4" />Managers ({agents.managers.length})</CardTitle></CardHeader>
                 <CardContent className="flex-1 overflow-hidden">
@@ -822,9 +771,7 @@ export default function ProjectView({
                 issueFilter={issueFilter}
                 setIssueFilter={setIssueFilter}
                 openIssueModal={openIssueModal}
-                setCreateIssueModal={setCreateIssueModal}
                 isWriteMode={isWriteMode}
-                humanfreeMode={humanfreeMode}
               />
             </div>
 
@@ -861,24 +808,15 @@ export default function ProjectView({
       <IntervalInfoModal open={intervalInfoModal} onClose={() => setIntervalInfoModal(false)} />
       <TimeoutInfoModal open={timeoutInfoModal} onClose={() => setTimeoutInfoModal(false)} />
       <ApiKeyHelpModal open={showApiKeyHelp} onClose={() => setShowApiKeyHelp(false)} />
-      {!humanfreeMode && <CreateIssueModal createIssueModal={createIssueModal} setCreateIssueModal={setCreateIssueModal} createIssue={createIssue} agents={agents} modKey={modKey} />}
       <IssueDetailPanel
         issueModal={issueModal}
         setIssueModal={setIssueModal}
-        isWriteMode={isWriteMode && !humanfreeMode}
+        isWriteMode={isWriteMode}
         authFetch={authFetch}
         projectApi={projectApi}
         submitIssueComment={submitIssueComment}
         modKey={modKey}
       />
-      {!humanfreeMode && <ChatPanel
-        open={chatPanelOpen}
-        onClose={() => setChatPanelOpen(false)}
-        selectedProject={selectedProject}
-        chatSession={chatSession}
-        onSessionCreated={(session) => setChatSession(session)}
-        modelTiers={config?.tiers || {}}
-      />}
       <ReportsPanel
         open={reportsPanelOpen}
         onClose={() => setReportsPanelOpen(false)}

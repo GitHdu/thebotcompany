@@ -2,7 +2,6 @@ import React from 'react'
 import { CircleDot, User, UserCheck, MessageSquare } from 'lucide-react'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 
 export default function IssuesSidebar({
@@ -10,9 +9,6 @@ export default function IssuesSidebar({
   issueFilter,
   setIssueFilter,
   openIssueModal,
-  setCreateIssueModal,
-  isWriteMode,
-  humanfreeMode = false,
 }) {
   const filteredIssues = issueFilter === 'all' ? issues : issues.filter(i => i.status === issueFilter)
 
@@ -53,14 +49,6 @@ export default function IssuesSidebar({
           {issues.length === 0 && <p className="text-sm text-neutral-400 dark:text-neutral-500">No issues</p>}
         </div>
         <Separator className="my-3 shrink-0" />
-        {isWriteMode && !humanfreeMode && <div className="shrink-0">
-          <Button 
-            onClick={() => setCreateIssueModal({ open: true, title: '', body: '', creating: false, error: null })}
-            className="w-full dark:bg-neutral-700 dark:hover:bg-neutral-600 dark:text-neutral-100"
-          >
-            Human Intervention (Create Issue)
-          </Button>
-        </div>}
       </CardContent>
     </Card>
   )
