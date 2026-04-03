@@ -771,7 +771,6 @@ export default function ProjectView({
                 issueFilter={issueFilter}
                 setIssueFilter={setIssueFilter}
                 openIssueModal={openIssueModal}
-                isWriteMode={isWriteMode}
               />
             </div>
 
