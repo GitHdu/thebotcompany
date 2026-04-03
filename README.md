@@ -32,6 +32,14 @@ tbc start
 
 Add projects through the dashboard UI, then start the orchestrator.
 
+## 当前分支作用（humanfree-only）
+
+本分支聚焦于 **humanfree 运行形态**，清理了监控端中与人工介入无关/冲突的交互路径，使界面和逻辑与“无人值守”目标保持一致。
+
+- 移除了人工介入/手动建单相关入口与组件
+- 移除了聊天面板与相关会话入口
+- 保留自动化执行、监控、报告、Issue 查看与评论等核心能力
+
 ## Technical Architecture
 
 ```mermaid
@@ -102,7 +110,7 @@ The dashboard provides:
 
 - **Project overview** — Status, phase, milestone progress, cycle count
 - **Agent reports** — Full history of agent outputs with markdown rendering
-- **Issue tracker** — SQLite-backed issues (agents communicate via issues, not GitHub issues for internal coordination)
+- **Issue tracker** — SQLite-backed issues for internal coordination (view + comments in this branch)
 - **PR monitoring** — Live GitHub PR status
 - **Cost tracking** — Per-agent and per-project cost breakdown (last call, average, 24h, total)
 - **Controls** — Pause/resume, skip agent, bootstrap, configure settings
