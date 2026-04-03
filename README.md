@@ -8,7 +8,6 @@ Human-free software development with self-organizing AI agent teams.
 - **Self-organizing teams** — AI managers (Athena, Ares, Apollo) plan, implement, and verify milestones without human intervention
 - **Multi-project** — Manage multiple repos from one central orchestrator with independent cycles
 - **Full observability** — Watch agents work through GitHub PRs and issues; every decision, discussion, and code change is visible
-- **Async human intervention** — Agents escalate via GitHub issues when they need human input; step in at your convenience
 - **Budget controls** — 24-hour rolling budget limiter with per-agent cost tracking
 - **Unified dashboard** — Monitor all projects, agents, issues, and PRs in one place (mobile-friendly, dark mode, push notifications)
 

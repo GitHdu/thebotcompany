@@ -49,7 +49,7 @@ export default function ProjectView({
   const { isWriteMode, handleLogout, setLoginModal, loginModal, loginInput, setLoginInput, handleLogin, authFetch } = useAuth()
   const { unreadCount } = useNotifications()
   const { showToast, toast, setToast } = useToast()
-  const humanfreeMode = import.meta.env.VITE_HUMANFREE_MODE === 'true'
+  const humanfreeMode = true
 
   // Project-specific state
   const [logs, setLogs] = useState([])
