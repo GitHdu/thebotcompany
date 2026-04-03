@@ -49,6 +49,7 @@ export default function ProjectView({
   const { isWriteMode, handleLogout, setLoginModal, loginModal, loginInput, setLoginInput, handleLogin, authFetch } = useAuth()
   const { unreadCount } = useNotifications()
   const { showToast, toast, setToast } = useToast()
+  const humanfreeMode = import.meta.env.VITE_HUMANFREE_MODE === 'true'
 
   // Project-specific state
   const [logs, setLogs] = useState([])
@@ -473,6 +474,7 @@ export default function ProjectView({
   }
 
   const createIssue = async () => {
+    if (humanfreeMode) return
     if (!createIssueModal.title.trim()) return
     setCreateIssueModal(prev => ({ ...prev, creating: true, error: null }))
     try {
@@ -727,14 +729,14 @@ export default function ProjectView({
                 setTimeoutInfoModal={setTimeoutInfoModal}
               />
 
-              <HumanInterventionCard
+              {!humanfreeMode && <HumanInterventionCard
                 issues={issues}
                 openIssueModal={openIssueModal}
                 setCreateIssueModal={setCreateIssueModal}
                 isWriteMode={isWriteMode}
-              />
+              />}
 
-              {isWriteMode && <ChatCard
+              {isWriteMode && !humanfreeMode && <ChatCard
                 selectedProject={selectedProject}
                 onOpenChat={(session) => { setChatSession(session); setChatPanelOpen(true) }}
                 onNewChat={(session) => { setChatSession(session); setChatPanelOpen(true) }}
@@ -822,6 +824,7 @@ export default function ProjectView({
                 openIssueModal={openIssueModal}
                 setCreateIssueModal={setCreateIssueModal}
                 isWriteMode={isWriteMode}
+                humanfreeMode={humanfreeMode}
               />
             </div>
 
@@ -858,24 +861,24 @@ export default function ProjectView({
       <IntervalInfoModal open={intervalInfoModal} onClose={() => setIntervalInfoModal(false)} />
       <TimeoutInfoModal open={timeoutInfoModal} onClose={() => setTimeoutInfoModal(false)} />
       <ApiKeyHelpModal open={showApiKeyHelp} onClose={() => setShowApiKeyHelp(false)} />
-      <CreateIssueModal createIssueModal={createIssueModal} setCreateIssueModal={setCreateIssueModal} createIssue={createIssue} agents={agents} modKey={modKey} />
+      {!humanfreeMode && <CreateIssueModal createIssueModal={createIssueModal} setCreateIssueModal={setCreateIssueModal} createIssue={createIssue} agents={agents} modKey={modKey} />}
       <IssueDetailPanel
         issueModal={issueModal}
         setIssueModal={setIssueModal}
-        isWriteMode={isWriteMode}
+        isWriteMode={isWriteMode && !humanfreeMode}
         authFetch={authFetch}
         projectApi={projectApi}
         submitIssueComment={submitIssueComment}
         modKey={modKey}
       />
-      <ChatPanel
+      {!humanfreeMode && <ChatPanel
         open={chatPanelOpen}
         onClose={() => setChatPanelOpen(false)}
         selectedProject={selectedProject}
         chatSession={chatSession}
         onSessionCreated={(session) => setChatSession(session)}
         modelTiers={config?.tiers || {}}
-      />
+      />}
       <ReportsPanel
         open={reportsPanelOpen}
         onClose={() => setReportsPanelOpen(false)}
