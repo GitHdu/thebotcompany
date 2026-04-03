@@ -12,6 +12,9 @@ All commands are available as `tbc-db <command>` — no setup needed, just run t
 # Create an issue
 tbc-db issue-create --title "Fix memory leak" --creator ares --assignee leo --body "Details here"
 
+# Escalate to human (requires human judgment)
+tbc-db issue-create --title "HUMAN: Choose pricing strategy" --creator ares --assignee human --labels "human-escalation" --body "Options and tradeoffs..."
+
 # List open issues
 tbc-db issue-list
 
@@ -56,6 +59,7 @@ tbc-db query "SELECT * FROM issues WHERE status = 'open' ORDER BY created_at DES
 - **Close issues when done** — don't leave stale issues open
 - **Comment on progress** — leave notes so other agents (and your future self) know what happened
 - **Don't create duplicate issues** — check `issue-list` first
+- **Human escalation format** — use `assignee=human`, title prefix `HUMAN:`, and label `human-escalation`
 
 ## Schema
 
@@ -64,7 +68,7 @@ tbc-db query "SELECT * FROM issues WHERE status = 'open' ORDER BY created_at DES
 | `issues` | id, title, body, status (open/closed), creator, assignee, labels, created_at |
 | `comments` | id, issue_id, author, body, created_at |
 | `agents` | id, name, role, reports_to, model, disabled |
-| `milestones` | id, description, cycles_budget, cycles_used, phase, status |
+| `milestones` | id, description, cycles_budget, cycles_used, verify_fail_count, escalated, phase, status |
 
 ## Visibility
 

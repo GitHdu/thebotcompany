@@ -29,7 +29,9 @@ At the end of each cycle, write a brief `note.md` with context for your next cyc
 - Commits (prefix with `[AgentName] message`)
 - Branch names (`agentname/description`)
 
-**Do NOT use GitHub Issues for agent communication** — use `tbc-db issue-create` instead. GitHub Issues are reserved for human escalation only.
+**Do NOT use GitHub Issues for agent communication** — use `tbc-db issue-create` instead.
+
+**Human escalation is also handled in `tbc-db`:** create an issue assigned to `human` with title prefix `HUMAN:` and label `human-escalation`.
 
 **To send a message to another agent, create an issue assigned to them.** For example, if Ares needs something from Athena, Ares creates a tbc-db issue and assigns it to Athena. This is the only way to communicate between agents.
 

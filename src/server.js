@@ -131,6 +131,31 @@ function stripMetaBlocks(text) {
     .trim();
 }
 
+function isHumanActor(actor) {
+  return actor === 'human' || actor === 'chat';
+}
+
+function parseLabels(labels) {
+  if (!labels || typeof labels !== 'string') return [];
+  return labels.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+}
+
+function hasLabel(labels, label) {
+  const target = String(label || '').trim().toLowerCase();
+  if (!target) return false;
+  return parseLabels(labels).includes(target);
+}
+
+function isHumanEscalationIssue(issue) {
+  if (!issue) return false;
+  const title = typeof issue.title === 'string' ? issue.title : '';
+  const creator = typeof issue.creator === 'string' ? issue.creator : '';
+  const assignee = typeof issue.assignee === 'string' ? issue.assignee : '';
+  const labels = typeof issue.labels === 'string' ? issue.labels : '';
+  if (isHumanActor(creator)) return false;
+  return assignee === 'human' || /^HUMAN:/i.test(title) || hasLabel(labels, 'human-escalation');
+}
+
 // --- Web Push (VAPID) --- Auto-generate keys if missing
 let VAPID_PUBLIC = process.env.VAPID_PUBLIC_KEY;
 let VAPID_PRIVATE = process.env.VAPID_PRIVATE_KEY;
@@ -208,6 +233,8 @@ function broadcastEvent(event) {
     error: `⚠️ ${event.message}`,
     'agent-done': `${event.success ? '✓' : '✗'} ${event.agent}: ${event.summary || 'no response'}`,
     'project-complete': `🏁 Project ${event.success ? 'completed' : 'ended'}: ${event.message}`,
+    'human-escalation': `🚨 Human escalation requested: ${event.title}`,
+    'human-escalation-resolved': `✅ Human escalation resolved: ${event.title}`,
   };
   const notification = {
     id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
@@ -306,6 +333,7 @@ class ProjectRunner {
     this.phase = 'athena'; // Start by asking Athena for first milestone
     this.milestoneTitle = null;
     this.milestoneDescription = null;
+    this.currentMilestoneId = null;
     this.milestoneCyclesBudget = 0;
     this.milestoneCyclesUsed = 0;
     this.verificationFeedback = null;
@@ -752,8 +780,33 @@ class ProjectRunner {
       CREATE TABLE IF NOT EXISTS agents (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, role TEXT, reports_to TEXT, model TEXT, disabled INTEGER DEFAULT 0, created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')));
       CREATE TABLE IF NOT EXISTS issues (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, body TEXT DEFAULT '', status TEXT DEFAULT 'open', creator TEXT NOT NULL, assignee TEXT, labels TEXT DEFAULT '', created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')), updated_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')), closed_at TEXT);
       CREATE TABLE IF NOT EXISTS comments (id INTEGER PRIMARY KEY AUTOINCREMENT, issue_id INTEGER NOT NULL REFERENCES issues(id), author TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')));
-      CREATE TABLE IF NOT EXISTS milestones (id INTEGER PRIMARY KEY AUTOINCREMENT, description TEXT NOT NULL, cycles_budget INTEGER DEFAULT 20, cycles_used INTEGER DEFAULT 0, phase TEXT DEFAULT 'implementation', status TEXT DEFAULT 'active', created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')), completed_at TEXT);
+      CREATE TABLE IF NOT EXISTS milestones (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        description TEXT NOT NULL,
+        cycles_budget INTEGER DEFAULT 20,
+        cycles_used INTEGER DEFAULT 0,
+        verify_fail_count INTEGER DEFAULT 0,
+        escalated INTEGER DEFAULT 0,
+        phase TEXT DEFAULT 'implementation',
+        status TEXT DEFAULT 'active',
+        created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        completed_at TEXT
+      );
     `);
+    try {
+      db.exec('ALTER TABLE milestones ADD COLUMN verify_fail_count INTEGER DEFAULT 0');
+    } catch (e) {
+      if (!/duplicate column name/i.test(e.message)) {
+        log(`Milestone migration failed: ${e.message}`, this.id);
+      }
+    }
+    try {
+      db.exec('ALTER TABLE milestones ADD COLUMN escalated INTEGER DEFAULT 0');
+    } catch (e) {
+      if (!/duplicate column name/i.test(e.message)) {
+        log(`Milestone migration failed: ${e.message}`, this.id);
+      }
+    }
     return db;
   }
 
@@ -809,7 +862,7 @@ class ProjectRunner {
       const issues = db.prepare(`
         SELECT i.*, (SELECT COUNT(*) FROM comments c WHERE c.issue_id = i.id) as comment_count
         FROM issues i ORDER BY i.created_at DESC
-      `).all();
+      `).all().map(issue => ({ ...issue, is_human_escalation: isHumanEscalationIssue(issue) }));
       db.close();
       return issues;
     } catch {
@@ -817,18 +870,125 @@ class ProjectRunner {
     }
   }
 
-  async createIssue(title, body = '', creator = 'human', assignee = null) {
+  async createIssue(title, body = '', creator = 'human', assignee = null, labels = '') {
     if (!title?.trim()) throw new Error('Missing issue title');
+    try {
+      const db = this.getDb();
+      const trimmedTitle = title.trim();
+      const normalizedLabels = typeof labels === 'string' ? labels.trim() : '';
+      const issueLike = { title: trimmedTitle, creator, assignee: assignee || null, labels: normalizedLabels };
+      const humanEscalation = isHumanEscalationIssue(issueLike);
+      const labelSet = new Set(parseLabels(normalizedLabels));
+      if (humanEscalation) labelSet.add('human-escalation');
+      const finalLabels = Array.from(labelSet).join(',');
+      const now = new Date().toISOString();
+      const result = db.prepare(
+        `INSERT INTO issues (title, body, creator, assignee, labels, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
+      ).run(trimmedTitle, body.trim(), creator, assignee || null, finalLabels, now, now);
+      if (humanEscalation && this.currentMilestoneId) {
+        db.prepare('UPDATE milestones SET escalated = 1 WHERE id = ?').run(this.currentMilestoneId);
+      }
+      db.close();
+      return { success: true, issueId: result.lastInsertRowid, isHumanEscalation: humanEscalation };
+    } catch (e) {
+      throw new Error(`Failed to create issue: ${e.message}`);
+    }
+  }
+
+  createMilestone(description, cyclesBudget) {
     try {
       const db = this.getDb();
       const now = new Date().toISOString();
       const result = db.prepare(
-        `INSERT INTO issues (title, body, creator, assignee, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
-      ).run(title.trim(), body.trim(), creator, assignee || null, now, now);
+        `INSERT INTO milestones (description, cycles_budget, cycles_used, verify_fail_count, escalated, phase, status, created_at)
+         VALUES (?, ?, 0, 0, 0, 'implementation', 'active', ?)`
+      ).run(description, cyclesBudget, now);
       db.close();
-      return { success: true, issueId: result.lastInsertRowid };
+      return result.lastInsertRowid;
     } catch (e) {
-      throw new Error(`Failed to create issue: ${e.message}`);
+      log(`Failed to create milestone record: ${e.message}`, this.id);
+      return null;
+    }
+  }
+
+  markCurrentMilestoneFailed() {
+    if (!this.currentMilestoneId) return;
+    try {
+      const db = this.getDb();
+      db.prepare(`UPDATE milestones SET status = 'failed', cycles_used = ? WHERE id = ?`).run(this.milestoneCyclesUsed || 0, this.currentMilestoneId);
+      db.close();
+    } catch (e) {
+      log(`Failed to mark milestone failed: ${e.message}`, this.id);
+    }
+  }
+
+  markCurrentMilestoneVerifyFail() {
+    if (!this.currentMilestoneId) return;
+    try {
+      const db = this.getDb();
+      db.prepare('UPDATE milestones SET verify_fail_count = verify_fail_count + 1, cycles_used = ? WHERE id = ?')
+        .run(this.milestoneCyclesUsed || 0, this.currentMilestoneId);
+      db.close();
+    } catch (e) {
+      log(`Failed to record verification fail: ${e.message}`, this.id);
+    }
+  }
+
+  markCurrentMilestoneCompleted() {
+    if (!this.currentMilestoneId) return;
+    try {
+      const db = this.getDb();
+      const now = new Date().toISOString();
+      db.prepare(`UPDATE milestones SET status = 'completed', cycles_used = ?, phase = 'verification', completed_at = ? WHERE id = ?`)
+        .run(this.milestoneCyclesUsed || 0, now, this.currentMilestoneId);
+      db.close();
+    } catch (e) {
+      log(`Failed to mark milestone completed: ${e.message}`, this.id);
+    }
+  }
+
+  getHumanFreeMetrics() {
+    const empty = {
+      completedMilestones: 0,
+      automatedClosedLoopRate: 0,
+      firstPassVerificationRate: 0,
+      escalationRatePerEpoch: 0,
+      openEscalations: 0,
+      totalEscalations: 0,
+      resolvedEscalations: 0,
+      avgEscalationResolutionMs: null,
+    };
+    try {
+      const db = this.getDb();
+      const milestones = db.prepare('SELECT status, COALESCE(verify_fail_count, 0) as verify_fail_count, COALESCE(escalated, 0) as escalated FROM milestones').all();
+      const completed = milestones.filter(m => m.status === 'completed');
+      const firstPassCompleted = completed.filter(m => (m.verify_fail_count || 0) === 0).length;
+      const noEscalationCompleted = completed.filter(m => (m.escalated || 0) === 0).length;
+
+      const issues = db.prepare('SELECT title, creator, assignee, labels, status, created_at, closed_at FROM issues').all();
+      const escalations = issues.filter(isHumanEscalationIssue);
+      const openEscalations = escalations.filter(i => i.status === 'open').length;
+      const resolvedEscalations = escalations.filter(i => i.status === 'closed' && i.closed_at).length;
+      const closedEscalations = escalations.filter(i => i.status === 'closed' && i.closed_at);
+      const resolutionSamples = closedEscalations
+        .map(i => Math.max(0, new Date(i.closed_at).getTime() - new Date(i.created_at).getTime()))
+        .filter(Number.isFinite);
+      db.close();
+
+      return {
+        completedMilestones: completed.length,
+        automatedClosedLoopRate: completed.length > 0 ? noEscalationCompleted / completed.length : 0,
+        firstPassVerificationRate: completed.length > 0 ? firstPassCompleted / completed.length : 0,
+        escalationRatePerEpoch: this.epochCount > 0 ? escalations.length / this.epochCount : 0,
+        openEscalations,
+        totalEscalations: escalations.length,
+        resolvedEscalations: closedEscalations.length,
+        avgEscalationResolutionMs: resolutionSamples.length > 0
+          ? resolutionSamples.reduce((a, b) => a + b, 0) / resolutionSamples.length
+          : null,
+      };
+    } catch {
+      return empty;
     }
   }
 
@@ -855,6 +1015,7 @@ class ProjectRunner {
       phase: this.phase,
       milestoneTitle: this.milestoneTitle,
       milestone: this.milestoneDescription,
+      currentMilestoneId: this.currentMilestoneId,
       milestoneCyclesBudget: this.milestoneCyclesBudget,
       milestoneCyclesUsed: this.milestoneCyclesUsed,
       isFixRound: this.isFixRound,
@@ -864,7 +1025,8 @@ class ProjectRunner {
       config: this.loadConfig(),
       agents: this.loadAgents(),
       cost: this.getCostSummary(),
-      budget: this.getBudgetStatus()
+      budget: this.getBudgetStatus(),
+      humanFree: this.getHumanFreeMetrics(),
     };
   }
 
@@ -1000,6 +1162,7 @@ class ProjectRunner {
         this.phase = state.phase || 'athena';
         this.milestoneTitle = state.milestoneTitle || null;
         this.milestoneDescription = state.milestoneDescription || null;
+        this.currentMilestoneId = state.currentMilestoneId || null;
         this.milestoneCyclesBudget = state.milestoneCyclesBudget || 0;
         this.milestoneCyclesUsed = state.milestoneCyclesUsed || 0;
         this.verificationFeedback = state.verificationFeedback || null;
@@ -1036,6 +1199,7 @@ class ProjectRunner {
         phase: this.phase,
         milestoneTitle: this.milestoneTitle,
         milestoneDescription: this.milestoneDescription,
+        currentMilestoneId: this.currentMilestoneId || null,
         milestoneCyclesBudget: this.milestoneCyclesBudget,
         milestoneCyclesUsed: this.milestoneCyclesUsed,
         verificationFeedback: this.verificationFeedback,
@@ -1116,6 +1280,7 @@ class ProjectRunner {
       phase: 'athena',
       milestoneTitle: null,
       milestoneDescription: null,
+      currentMilestoneId: null,
       milestoneCyclesBudget: 0,
       milestoneCyclesUsed: 0,
       verificationFeedback: null,
@@ -1361,9 +1526,11 @@ class ProjectRunner {
             if (milestoneMatch) {
               try {
                 const milestone = JSON.parse(milestoneMatch[1]);
+                const newMilestoneId = this.createMilestone(milestone.description, milestone.cycles || 20);
                 this.setState({
                   milestoneTitle: milestone.title || milestone.description.slice(0, 80),
                   milestoneDescription: milestone.description,
+                  currentMilestoneId: newMilestoneId,
                   milestoneCyclesBudget: milestone.cycles || 20,
                   milestoneCyclesUsed: 0,
                   verificationFeedback: null,
@@ -1425,7 +1592,8 @@ class ProjectRunner {
         // Check if deadline missed (before running)
         if (this.milestoneCyclesUsed >= this.milestoneCyclesBudget) {
           log(`⏰ Implementation deadline missed (${this.milestoneCyclesUsed}/${this.milestoneCyclesBudget} cycles)`, this.id);
-          this.setState({ phase: 'athena' });
+          this.markCurrentMilestoneFailed();
+          this.setState({ phase: 'athena', currentMilestoneId: null });
           continue;
         }
 
@@ -1552,10 +1720,12 @@ class ProjectRunner {
           if (decision === 'pass') {
             log(`✅ Milestone verified — waking Athena for next milestone`, this.id);
             broadcastEvent({ type: 'verified', project: this.id, title: this.milestoneTitle });
+            this.markCurrentMilestoneCompleted();
             this.milestoneTitle = null;
             this.setState({
               milestoneTitle: null,
               milestoneDescription: null,
+              currentMilestoneId: null,
               milestoneCyclesBudget: 0,
               milestoneCyclesUsed: 0,
               verificationFeedback: null,
@@ -1565,6 +1735,7 @@ class ProjectRunner {
           } else if (decision === 'fail') {
             log(`❌ Verification failed — returning to Ares (${Math.floor(this.milestoneCyclesBudget / 2)} fix cycles)`, this.id);
             broadcastEvent({ type: 'verify-fail', project: this.id, title: this.milestoneTitle });
+            this.markCurrentMilestoneVerifyFail();
             const fixBudget = Math.floor(this.milestoneCyclesBudget / 2);
             this.setState({
               milestoneCyclesBudget: this.milestoneCyclesUsed + fixBudget,
@@ -3251,10 +3422,23 @@ const server = http.createServer(async (req, res) => {
             return;
           }
           const db = runner.getDb();
+          const existing = db.prepare('SELECT * FROM issues WHERE id = ?').get(issueId);
+          if (!existing) {
+            db.close();
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Issue not found' }));
+            return;
+          }
           const now = new Date().toISOString();
           const closedAt = status === 'closed' ? now : null;
           db.prepare('UPDATE issues SET status = ?, updated_at = ?, closed_at = ? WHERE id = ?').run(status, now, closedAt, issueId);
           db.close();
+          if (existing.status !== status) {
+            const updatedIssue = { ...existing, status, closed_at: closedAt };
+            if (isHumanEscalationIssue(updatedIssue) && status === 'closed') {
+              broadcastEvent({ type: 'human-escalation-resolved', project: runner.id, title: updatedIssue.title || `#${issueId}` });
+            }
+          }
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ success: true }));
         } catch (e) {
@@ -3280,10 +3464,19 @@ const server = http.createServer(async (req, res) => {
       req.on('data', c => body += c);
       req.on('end', async () => {
         try {
-          const { title, body: issueBody, creator, assignee, text } = JSON.parse(body);
+          const parsed = JSON.parse(body);
+          const title = typeof parsed.title === 'string' ? parsed.title : null;
+          const issueBody = typeof parsed.body === 'string' ? parsed.body : '';
+          const creator = typeof parsed.creator === 'string' ? parsed.creator : 'human';
+          const assignee = typeof parsed.assignee === 'string' ? parsed.assignee : null;
+          const labels = typeof parsed.labels === 'string' ? parsed.labels : '';
+          const text = typeof parsed.text === 'string' ? parsed.text : null;
           // Support both new format (title/body/creator) and legacy (text)
           if (title) {
-            const result = await runner.createIssue(title, issueBody, creator, assignee);
+            const result = await runner.createIssue(title, issueBody, creator, assignee, labels);
+            if (result.isHumanEscalation) {
+              broadcastEvent({ type: 'human-escalation', project: runner.id, title: title.trim() });
+            }
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify(result));
           } else if (text) {

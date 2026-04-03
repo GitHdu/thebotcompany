@@ -151,4 +151,4 @@ You can control what each worker sees by adding `visibility` to your SCHEDULE:
 
 ## Escalate to Human
 
-If a decision truly requires human judgment, create a GitHub issue titled "HUMAN: [description]".
+If a decision truly requires human judgment, create a `tbc-db` issue titled `HUMAN: [description]`, assign it to `human`, and add label `human-escalation`.

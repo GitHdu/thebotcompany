@@ -5,7 +5,23 @@ import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import SleepCountdown from '@/components/layout/SleepCountdown'
 
+function formatPercent(v) {
+  return `${((v || 0) * 100).toFixed(0)}%`
+}
+
+function formatDuration(ms) {
+  if (!ms) return '--'
+  const totalSeconds = Math.floor(ms / 1000)
+  const h = Math.floor(totalSeconds / 3600)
+  const m = Math.floor((totalSeconds % 3600) / 60)
+  const s = totalSeconds % 60
+  if (h > 0) return `${h}h ${m}m`
+  if (m > 0) return `${m}m ${s}s`
+  return `${s}s`
+}
+
 export function OrchestratorStateCard({ selectedProject, globalUptime, controlAction, isWriteMode }) {
+  const humanFree = selectedProject.humanFree || {}
   return (
     <Card>
       <CardHeader><CardTitle className="flex items-center gap-2"><Activity className="w-4 h-4" />Orchestrator State</CardTitle></CardHeader>
@@ -84,6 +100,24 @@ export function OrchestratorStateCard({ selectedProject, globalUptime, controlAc
           <div className="flex justify-between items-center">
             <span className="text-neutral-600 dark:text-neutral-300">Uptime</span>
             <span className="text-sm font-mono">{Math.floor(globalUptime / 3600)}h {Math.floor((globalUptime % 3600) / 60)}m</span>
+          </div>
+          <Separator className="my-2" />
+          <div className="text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">Human-free Metrics</div>
+          <div className="flex justify-between items-center">
+            <span className="text-neutral-600 dark:text-neutral-300">Auto Closed-loop</span>
+            <span className="text-sm font-mono">{formatPercent(humanFree.automatedClosedLoopRate)}</span>
+          </div>
+          <div className="flex justify-between items-center">
+            <span className="text-neutral-600 dark:text-neutral-300">First-pass Verify</span>
+            <span className="text-sm font-mono">{formatPercent(humanFree.firstPassVerificationRate)}</span>
+          </div>
+          <div className="flex justify-between items-center">
+            <span className="text-neutral-600 dark:text-neutral-300">Escalations (open/total)</span>
+            <span className="text-sm font-mono">{humanFree.openEscalations || 0}/{humanFree.totalEscalations || 0}</span>
+          </div>
+          <div className="flex justify-between items-center">
+            <span className="text-neutral-600 dark:text-neutral-300">Avg Escalation Resolve</span>
+            <span className="text-sm font-mono">{formatDuration(humanFree.avgEscalationResolutionMs)}</span>
           </div>
         </div>
         {isWriteMode && !selectedProject.paused && selectedProject.running && (

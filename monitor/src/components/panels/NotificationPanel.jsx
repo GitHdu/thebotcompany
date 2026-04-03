@@ -8,7 +8,17 @@ import { useNotifications } from '@/contexts/NotificationContext'
 
 function NotifItem({ n, expandedNotifs, toggleNotifExpand, markRead }) {
   const expanded = expandedNotifs.has(n.id)
-  const typeIcons = { milestone: '📌', verified: '✅', 'verify-fail': '❌', phase: '🔄', error: '⚠️', 'agent-done': n.message?.startsWith('✗') ? '✗' : '✓', 'project-complete': '🏁' }
+  const typeIcons = {
+    milestone: '📌',
+    verified: '✅',
+    'verify-fail': '❌',
+    phase: '🔄',
+    error: '⚠️',
+    'agent-done': n.message?.startsWith('✗') ? '✗' : '✓',
+    'project-complete': '🏁',
+    'human-escalation': '🚨',
+    'human-escalation-resolved': '✅',
+  }
   const icon = typeIcons[n.type] || '📋'
   const isLong = n.message && n.message.length > 120
   const displayMsg = isLong && !expanded ? n.message.slice(0, 120) + '…' : n.message

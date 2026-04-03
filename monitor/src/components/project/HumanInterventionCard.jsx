@@ -13,16 +13,16 @@ export default function HumanInterventionCard({
 }) {
   const [filter, setFilter] = useState('open')
 
-  // Human intervention issues: created by human OR assigned to human
+  // Human intervention issues: escalation queue + human-created requests
   const humanIssues = issues.filter(i =>
-    i.creator === 'human' || i.assignee === 'human' || i.creator === 'chat'
+    i.is_human_escalation || i.creator === 'human' || i.assignee === 'human' || i.creator === 'chat'
   )
   const filtered = filter === 'all' ? humanIssues : humanIssues.filter(i => i.status === filter)
   const openCount = humanIssues.filter(i => i.status === 'open').length
 
-  // Split into: from human (human created) and to human (assigned to human)
+  // Split into: from human (human created) and to human (agent escalation)
   const fromHuman = filtered.filter(i => i.creator === 'human' || i.creator === 'chat')
-  const toHuman = filtered.filter(i => i.assignee === 'human' && i.creator !== 'human' && i.creator !== 'chat')
+  const toHuman = filtered.filter(i => i.is_human_escalation || (i.assignee === 'human' && i.creator !== 'human' && i.creator !== 'chat'))
 
   return (
     <Card className="flex flex-col max-h-[500px]">

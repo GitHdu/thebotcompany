@@ -483,7 +483,8 @@ export default function ProjectView({
           title: createIssueModal.title.trim(),
           body: createIssueModal.body.trim(),
           creator: 'human',
-          assignee: createIssueModal.receiver || null
+          assignee: createIssueModal.receiver || null,
+          labels: createIssueModal.receiver === 'human' ? 'human-escalation' : ''
         })
       })
       const data = await res.json()
